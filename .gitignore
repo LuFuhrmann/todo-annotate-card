@@ -1,0 +1,5 @@
+node_modules/
+*.log
+.DS_Store
+# private preview screenshots (contain personal data), not part of the repository
+screenshots/vorschau-*

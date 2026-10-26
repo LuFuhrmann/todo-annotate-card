@@ -1,0 +1,13 @@
+{
+  "entity": "todo.weekly_plan",
+  "friendly_name": "Weekly plan",
+  "language": "en",
+  "config": { "title": "Meals", "annotation_label": "Deviation", "format": "❗ Deviation: {text}", "group_by": "due_day" },
+  "items": [
+    { "uid": "a1", "summary": "Mon 07:00 Breakfast", "status": "completed", "description": "Porridge with banana and peanut butter\n22 g protein · 650 kcal", "due": "2026-10-26T07:00:00+01:00" },
+    { "uid": "a2", "summary": "Mon 12:30 Lunch", "status": "completed", "description": "Chicken wraps with cream cheese and cucumber\n28 g protein · 560 kcal\n❗ Deviation: Pizza with colleagues", "due": "2026-10-26T12:30:00+01:00" },
+    { "uid": "a3", "summary": "Mon 16:00 Snack", "status": "needs_action", "description": "Nuts and an apple\n8 g protein · 320 kcal", "due": "2026-10-26T16:00:00+01:00" },
+    { "uid": "a4", "summary": "Mon 19:00 Dinner", "status": "needs_action", "description": "Rice with tuna and corn\n32 g protein · 680 kcal", "due": "2026-10-26T19:00:00+01:00" },
+    { "uid": "a5", "summary": "Tue 07:00 Breakfast", "status": "needs_action", "description": "Skyr bowl with granola\n30 g protein · 560 kcal", "due": "2026-10-27T07:00:00+01:00" }
+  ]
+}

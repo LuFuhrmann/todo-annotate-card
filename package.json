@@ -1,0 +1,31 @@
+{
+  "name": "todo-annotate-card",
+  "version": "1.0.0",
+  "description": "Home Assistant Lovelace card: to-do list with a second checkbox to attach a note (e.g. a deviation) to an item.",
+  "main": "dist/todo-annotate-card.js",
+  "scripts": {
+    "build": "esbuild src/todo-annotate-card.ts --bundle --format=esm --target=es2021 --minify --legal-comments=eof --outfile=dist/todo-annotate-card.js",
+    "typecheck": "tsc -p .",
+    "test": "vitest run",
+    "screenshots": "node test/render.mjs",
+    "all": "npm run typecheck && npm test && npm run build && npm run screenshots"
+  },
+  "keywords": [
+    "home-assistant",
+    "lovelace",
+    "hacs",
+    "todo",
+    "custom-card"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "esbuild": "^0.28.2",
+    "lit": "^3.3.3",
+    "playwright-core": "^1.64.1",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  },
+  "private": true
+}
