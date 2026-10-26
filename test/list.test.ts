@@ -41,6 +41,17 @@ describe("buildView", () => {
   it("returns no groups for an empty list", () => {
     expect(buildView([], cfg())).toEqual([]);
   });
+  it("splits a skip line out of the description only when skip is enabled", () => {
+    const its: TodoItem[] = [{ uid: "s", summary: "Lunch", status: "completed", description: "Soup\n⊘ Ausgelassen" }];
+    const off = buildView(its, cfg());
+    expect(off[0].items[0].skip).toBeNull();
+    expect(off[0].items[0].base).toBe("Soup\n⊘ Ausgelassen");
+    const on = buildView(its, cfg({ skip: true, skip_format: "⊘ Ausgelassen" }));
+    expect(on[0].items[0].skip).toBe("");
+    expect(on[0].items[0].base).toBe("Soup");
+    expect(on[0].items[0].annotation).toBeNull();
+    expect(on[0].items[0].item.summary).toBe("Lunch");
+  });
 });
 
 describe("resolveConfig", () => {
@@ -50,6 +61,8 @@ describe("resolveConfig", () => {
     expect(c.format).toBe("❗ Abweichung: {text}");
     expect(c.auto_complete).toBe(true);
     expect(c.marker).toBe("❗");
+    expect(c.skip).toBe(false);
+    expect(c.skip_format).toBe("");
   });
   it("allows an empty marker", () => {
     expect(cfg({ marker: "" }).marker).toBe("");

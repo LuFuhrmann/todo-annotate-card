@@ -29,6 +29,15 @@ export interface TodoAnnotateCardConfig {
   show_due?: boolean;
   compact?: boolean;
   show_header?: boolean;
+  /** Optional third checkbox. Off by default so existing cards stay unchanged. */
+  skip?: boolean;
+  /** Legend/ARIA label. Defaults to “Skipped” / “Ausgelassen”. */
+  skip_label?: string;
+  /**
+   * Description line for a skipped item. Without `{text}` the line is a flag
+   * (default “⊘ Ausgelassen” or “⊘ Skipped”). With `{text}` the card asks for a reason.
+   */
+  skip_format?: string;
 }
 
 // Minimal subset of the Home Assistant frontend `hass` object used by the card.

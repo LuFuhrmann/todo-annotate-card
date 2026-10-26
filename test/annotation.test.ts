@@ -2,11 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SEPARATOR,
   DEFAULT_TEMPLATE,
+  SKIP_FORMAT_DE,
+  SKIP_FORMAT_EN,
   decodeText,
+  defaultSkipFormat,
+  effectiveSkipFormat,
   encodeText,
   mergeDescription,
+  mergeMarkers,
   normalizeTemplate,
   parseDescription,
+  parseMarkers,
   withAnnotation,
 } from "../src/annotation";
 
@@ -75,6 +81,48 @@ describe("mergeDescription / withAnnotation", () => {
   it("is idempotent", () => {
     const once = withAnnotation(PLAN, "x", fmt);
     expect(withAnnotation(once, "x", fmt)).toBe(once);
+  });
+});
+
+const skipFlag = { template: SKIP_FORMAT_DE, separator: DEFAULT_SEPARATOR };
+const skipReason = { template: "⊘ Ausgelassen: {text}", separator: DEFAULT_SEPARATOR };
+
+describe("skipped marker line", () => {
+  it("stores the German default as its own flag line and leaves the summary's plan text untouched", () => {
+    const stored = mergeMarkers(PLAN, null, "", fmt, skipFlag);
+    expect(stored).toBe(`${PLAN}\n⊘ Ausgelassen`);
+    expect(parseMarkers(stored, fmt, skipFlag)).toEqual({ base: PLAN, annotation: null, skip: "" });
+  });
+  it("stores an English default flag line", () => {
+    const en = { template: SKIP_FORMAT_EN, separator: DEFAULT_SEPARATOR };
+    expect(mergeMarkers("Soup", null, "", fmt, en)).toBe("Soup\n⊘ Skipped");
+    expect(parseMarkers("Soup\n⊘ Skipped", fmt, en).skip).toBe("");
+  });
+  it("stores a reason when the format contains {text}", () => {
+    const stored = mergeMarkers(PLAN, null, "keine Zeit", fmt, skipReason);
+    expect(stored).toBe(`${PLAN}\n⊘ Ausgelassen: keine Zeit`);
+    expect(parseMarkers(stored, fmt, skipReason)).toEqual({ base: PLAN, annotation: null, skip: "keine Zeit" });
+  });
+  it("keeps annotation and skip on separate lines and can drop either", () => {
+    const both = mergeMarkers(PLAN, "Pizza", "keine Zeit", fmt, skipReason);
+    expect(both).toBe(`${PLAN}\n❗ Abweichung: Pizza\n⊘ Ausgelassen: keine Zeit`);
+    expect(parseMarkers(both, fmt, skipReason)).toEqual({ base: PLAN, annotation: "Pizza", skip: "keine Zeit" });
+    expect(mergeMarkers(PLAN, "Pizza", null, fmt, skipReason)).toBe(`${PLAN}\n❗ Abweichung: Pizza`);
+    expect(mergeMarkers(PLAN, null, "keine Zeit", fmt, skipReason)).toBe(`${PLAN}\n⊘ Ausgelassen: keine Zeit`);
+  });
+  it("does not treat a reason line as the flag format", () => {
+    expect(parseMarkers(`${PLAN}\n⊘ Ausgelassen: keine Zeit`, fmt, skipFlag).skip).toBeNull();
+  });
+  it("tolerates whitespace around the flag", () => {
+    expect(parseMarkers(`${PLAN}\n  ⊘   Ausgelassen  `, fmt, skipFlag).skip).toBe("");
+  });
+  it("picks the language default only when skip_format is unset", () => {
+    expect(defaultSkipFormat("de")).toBe("⊘ Ausgelassen");
+    expect(defaultSkipFormat("de-DE")).toBe("⊘ Ausgelassen");
+    expect(defaultSkipFormat("en")).toBe("⊘ Skipped");
+    expect(effectiveSkipFormat("", "de")).toBe("⊘ Ausgelassen");
+    expect(effectiveSkipFormat("⊘ Ausgelassen: {text}", "en")).toBe("⊘ Ausgelassen: {text}");
+    expect(effectiveSkipFormat("⊘ {text} {text}", "de")).toBe("⊘ Ausgelassen");
   });
 });
 

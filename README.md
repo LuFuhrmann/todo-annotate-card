@@ -5,7 +5,7 @@ Tick it to attach a short note, e.g. a *deviation* from a meal plan, a *problem*
 The note is merged into the item, the item is marked with ❗ (configurable) and shows only the note.
 Tap the item to see the original description again.
 
-[![hacs][hacs-badge]][hacs-url] ![version](https://img.shields.io/badge/version-1.0.0-blue) ![license](https://img.shields.io/badge/license-MIT-green)
+[![hacs][hacs-badge]][hacs-url] ![version](https://img.shields.io/badge/version-1.1.0-blue) ![license](https://img.shields.io/badge/license-MIT-green)
 
 *Deutsch: siehe [unten](#deutsch).*
 
@@ -14,8 +14,9 @@ Tap the item to see the original description again.
 | ![Light](screenshots/demo-hell-1-uebersicht.png) | ![Dark, expanded](screenshots/demo-dunkel-2-aufgeklappt.png) | ![Editor](screenshots/demo-hell-3-eingabe.png) |
 
 ## Features
-- Two checkboxes per item: **Done** (the normal to-do status) and a configurable second one (label, icon, marker).
+- Two checkboxes per item: **Done** (the normal to-do status) and a configurable second one (label, icon, marker). Optional third checkbox **Skipped** (`skip: true`), off unless you turn it on.
 - Inline note editor (single- or multi-line). Saving keeps the original description, appends one formatted line and can mark the item done. **The item summary is never changed**, so automations or scripts can keep using it as a key.
+- A typed note is saved when you tap the note checkbox again, mark the item done, or open another item. Only **Cancel** drops the edit, and even then the text stays as a draft (in this browser, per list and item) until a successful save. While the editor is open the checkbox is indeterminate and shows “Not saved yet”.
 - Annotated items show marker + note only; the original description expands on tap. Notes can be edited or removed (removing returns the item to normal).
 - Works with any `todo.*` entity whose integration can edit descriptions (e.g. **Local To-do**). Lists without description support show a clear message.
 - Live updates (`todo/item/subscribe`), writes via the `todo.update_item` action.
@@ -35,7 +36,7 @@ HACS adds the dashboard resource automatically.
 ### Manual
 1. Download `todo-annotate-card.js` from the [latest release](https://github.com/LuFuhrmann/todo-annotate-card/releases) (or `dist/`).
 2. Copy it to `/config/www/todo-annotate-card.js`.
-3. Settings → Dashboards → ⋮ → **Resources** → add `/local/todo-annotate-card.js?v=1.0.0`, type **JavaScript module**. Increase `?v=` after every update.
+3. Settings → Dashboards → ⋮ → **Resources** → add `/local/todo-annotate-card.js?v=1.1.0`, type **JavaScript module**. Increase `?v=` after every update.
 
 ## Configuration
 Add the card from the card picker (**Todo Annotate Card**) or use YAML:
@@ -63,8 +64,11 @@ entity: todo.meal_plan
 | `group_by` | `none` \| `due_day` | `none` | Group items by the day they are due. |
 | `description` | `always` \| `collapsed` \| `hidden` | `always` | Description of items *without* a note. Annotated items always show the note and reveal the description on tap. |
 | `show_due` | bool | `true` | Show due date/time. |
-| `show_header` | bool | `true` | Show the legend explaining the two checkboxes. |
+| `show_header` | bool | `true` | Show the legend explaining the checkboxes. |
 | `compact` | bool | `false` | Denser layout. |
+| `skip` | bool | `false` | Third checkbox. Off leaves existing cards unchanged. |
+| `skip_label` | string | `Skipped` / `Ausgelassen` | Label of the third checkbox (legend, ARIA, hint). |
+| `skip_format` | string | `⊘ Skipped` or `⊘ Ausgelassen` | Line stored in the description. Depends on the Home Assistant language when unset. If it contains `{text}` once, the card asks for a reason. |
 
 ### Examples
 Meal plan with deviations, grouped by day (German UI):
@@ -87,6 +91,17 @@ format: "⚠️ Problem: {text}"
 show_completed: false
 sort: due
 ```
+
+Meal plan that can mark a slot skipped (German storage line, with a reason):
+```yaml
+type: custom:todo-annotate-card
+entity: todo.meal_plan
+skip: true
+skip_label: Ausgelassen
+skip_format: "⊘ Ausgelassen: {text}"
+```
+
+Without `{text}` the line is only a flag. Set `skip_format` explicitly if another tool reads the description; otherwise a German UI stores `⊘ Ausgelassen` and an English UI stores `⊘ Skipped`.
 
 Shopping list with substitutes, notes do not tick the item:
 ```yaml
@@ -113,6 +128,26 @@ Porridge with banana            ← original description (kept)
 - Parsing tolerates extra whitespace and CRLF; the last matching line wins.
 - Because it is plain text, the note stays visible in the standard to-do card, the mobile app and in automations (`todo.get_items`). Other tools can parse it with the same pattern, e.g. Python: `re.match(r"^\s*❗\s*Abweichung\s*:\s*(.*)$", line)`.
 - Changing `format` later does not convert existing notes. Keep it stable if other tools read the notes.
+
+### Skipped items
+Skipped is a separate line. The summary is still not changed, and the item is marked done. The note line and the skip line are mutually exclusive: setting one removes the other (the card asks first when a note would be deleted). Unchecking **Skipped** leaves the item done. Unchecking **Done** removes the skip line and marks the item not done.
+
+Default lines (only when `skip_format` is unset):
+
+| UI language | Line |
+|---|---|
+| German | `⊘ Ausgelassen` |
+| English | `⊘ Skipped` |
+
+With a reason, set `skip_format` to a template that contains `{text}` once, for example `⊘ Ausgelassen: {text}`. The stored line is then `⊘ Ausgelassen: keine Zeit`. Python:
+
+```python
+re.match(r"^\s*⊘\s*Ausgelassen\s*$", line)          # German default, no reason
+re.match(r"^\s*⊘\s*Skipped\s*$", line)              # English default, no reason
+re.match(r"^\s*⊘\s*Ausgelassen\s*:\s*(.*)\s*$", line)  # reason captured in group 1
+```
+
+On the card a skipped item shows `⊘` plus the name in grey, a “Skipped” hint (and the reason, if any). Tap it to see the original description, same as a note.
 
 ## Compatibility
 - Home Assistant 2024.1 or newer (to-do item descriptions and `todo/item/subscribe`).
@@ -143,9 +178,11 @@ Die ursprüngliche Beschreibung erscheint erst, wenn du den Punkt antippst. Die 
 - Funktioniert mit jeder `todo.*`-Liste, die Beschreibungen bearbeiten kann (z. B. **Lokale To-do-Liste**).
 - Gespeichert wird eine Zeile in der Beschreibung, Standard `❗ Abweichung: <Text>`. Der Name (summary) des Punkts wird **nie** geändert.
 - Mehrzeilige Eingaben werden mit ` / ` zu einer Zeile verbunden.
+- Tippt man die Anmerkung an, speichert sie auch, wenn die Checkbox erneut angetippt, der Punkt als erledigt markiert oder ein anderer Punkt geöffnet wird. Nur **Abbrechen** verwirft den Schreibvorgang; der Text bleibt als Entwurf erhalten und erscheint beim nächsten Öffnen wieder. Solange der Editor offen ist, ist die Checkbox unbestimmt und zeigt „Noch nicht gespeichert“.
+- Optionale dritte Checkbox **Ausgelassen** (`skip: true`, standardmäßig aus). Speicherzeile ohne `skip_format` bei deutscher Oberfläche: `⊘ Ausgelassen`. Mit Grund z. B. `skip_format: "⊘ Ausgelassen: {text}"` → Zeile `⊘ Ausgelassen: keine Zeit`. Anmerkung und Ausgelassen schließen sich aus. Abhaken setzt den Punkt auf erledigt; das Häkchen bei Erledigt zu entfernen löscht die Ausgelassen-Zeile; nur Ausgelassen abwählen lässt den Punkt erledigt.
 - Oberfläche auf Deutsch oder Englisch, je nach HA-Sprache; visueller Karten-Editor; hell/dunkel; gut bedienbar in der HA-App am Handy.
 
-Installation: HACS → ⋮ → *Benutzerdefinierte Repositories* → Repository-URL, Kategorie **Dashboard** → herunterladen. Manuell: Datei nach `/config/www/` kopieren und unter *Einstellungen → Dashboards → Ressourcen* als `/local/todo-annotate-card.js?v=1.0.0` (JavaScript-Modul) eintragen.
+Installation: HACS → ⋮ → *Benutzerdefinierte Repositories* → Repository-URL, Kategorie **Dashboard** → herunterladen. Manuell: Datei nach `/config/www/` kopieren und unter *Einstellungen → Dashboards → Ressourcen* als `/local/todo-annotate-card.js?v=1.1.0` (JavaScript-Modul) eintragen.
 
 [hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
 [hacs-url]: https://hacs.xyz/docs/faq/custom_repositories

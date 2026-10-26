@@ -6,6 +6,11 @@ const en = {
   remove: "Remove {label}",
   edit: "Edit {label}",
   placeholder: "What was different?",
+  unsaved: "Not saved yet",
+  skipped: "Skipped",
+  skip_placeholder: "Why was this skipped?",
+  confirm_remove_note: "Remove the note “{text}”? This item will be marked skipped instead.",
+  confirm_remove: "Remove note",
   show_details: "Show details",
   hide_details: "Hide details",
   completed: "Completed",
@@ -46,6 +51,9 @@ const en = {
   e_show_due: "Show due date",
   e_compact: "Compact",
   e_show_header: "Show legend",
+  e_skip: "Third checkbox: skipped",
+  e_skip_label: "Label of the skipped checkbox",
+  e_skip_format: "Storage line for skipped items ({text} = reason, optional)",
 };
 type Key = keyof typeof en;
 const de: Record<Key, string> = {
@@ -56,6 +64,11 @@ const de: Record<Key, string> = {
   remove: "{label} entfernen",
   edit: "{label} bearbeiten",
   placeholder: "Was war anders?",
+  unsaved: "Noch nicht gespeichert",
+  skipped: "Ausgelassen",
+  skip_placeholder: "Warum ausgelassen?",
+  confirm_remove_note: "Anmerkung „{text}“ entfernen? Der Punkt wird stattdessen als ausgelassen markiert.",
+  confirm_remove: "Anmerkung entfernen",
   show_details: "Details anzeigen",
   hide_details: "Details ausblenden",
   completed: "Erledigt",
@@ -95,6 +108,9 @@ const de: Record<Key, string> = {
   e_show_due: "Fälligkeit anzeigen",
   e_compact: "Kompakt",
   e_show_header: "Legende anzeigen",
+  e_skip: "Dritte Checkbox: ausgelassen",
+  e_skip_label: "Beschriftung der Ausgelassen-Checkbox",
+  e_skip_format: "Speicherzeile für ausgelassene Punkte ({text} = Grund, optional)",
 };
 const TABLES: Record<string, Record<Key, string>> = { en, de };
 

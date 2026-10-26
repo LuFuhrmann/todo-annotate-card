@@ -51,7 +51,7 @@ const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-san
 const results = [];
 const check = (name, ok, info = "") => { results.push({ name, ok }); console.log(`${ok ? "PASS" : "FAIL"} ${name}${info ? " – " + info : ""}`); };
 
-async function setup(theme, { editor = false, features = 127 } = {}) {
+async function setup(theme, { editor = false, features = 127, config = {} } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, timezoneId: "Europe/Berlin", locale: fixture.language === "de" ? "de-DE" : "en-US", colorScheme: theme === "dunkel" ? "dark" : "light" });
   const page = await ctx.newPage();
   const errors = [];
@@ -59,7 +59,7 @@ async function setup(theme, { editor = false, features = 127 } = {}) {
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   await page.goto(base);
   await page.waitForFunction(() => customElements.get("todo-annotate-card"));
-  await page.evaluate(({ vars, fixture, editor, features }) => {
+  await page.evaluate(({ vars, fixture, editor, features, config }) => {
     for (const [k, v] of Object.entries(vars)) document.documentElement.style.setProperty(k, v);
     let items = structuredClone(fixture.items);
     const subs = new Set();
@@ -86,10 +86,10 @@ async function setup(theme, { editor = false, features = 127 } = {}) {
       const wrap = document.createElement("ha-card"); wrap.style.padding = "16px"; wrap.appendChild(ed); host.appendChild(wrap);
     } else {
       const card = document.createElement("todo-annotate-card");
-      card.setConfig({ type: "custom:todo-annotate-card", entity: fixture.entity, ...fixture.config });
+      card.setConfig({ type: "custom:todo-annotate-card", entity: fixture.entity, ...fixture.config, ...config });
       card.hass = hass; host.appendChild(card);
     }
-  }, { vars: THEMES[theme], fixture, editor, features });
+  }, { vars: THEMES[theme], fixture, editor, features, config });
   await page.waitForTimeout(200);
   return { ctx, page, errors };
 }
@@ -132,6 +132,8 @@ for (const theme of ["hell", "dunkel"]) {
   check(`${theme}: editor field focused`, await field.evaluate((el) => el.getRootNode().activeElement === el));
   const typed = fixture.typed ?? "Burger instead\nplus a soda";
   await field.fill(typed);
+  check(`${theme}: unsaved hint`, (await openRow.locator(".pending").innerText()).trim() === "Not saved yet");
+  check(`${theme}: annotation checkbox indeterminate`, await openRow.locator("label.ann input").evaluate((el) => el.indeterminate === true));
   await shot(page, `${theme}-3-eingabe`);
 
   // 4) save -> merged, completed, marker
@@ -206,6 +208,117 @@ for (const theme of ["hell", "dunkel"]) {
   const imgs = await card(page).locator("img, b, script").count();
   check("xss: markup rendered as text", xss === undefined && imgs === 0);
   await ctx.close();
+}
+
+// Regression: typed text must survive every way of leaving the editor except Cancel.
+{
+  const rowText = async (page, index) => {
+    const rows = card(page).locator("li.item");
+    const row = rows.nth(index);
+    await row.locator("label.ann input").click();
+    await page.waitForTimeout(80);
+    await row.locator(".editor .field").fill("Pizza with colleagues");
+    return row;
+  };
+  const lastCall = (page) => page.evaluate(() => window.__calls.at(-1));
+
+  {
+    const { ctx, page } = await setup("hell");
+    const row = await rowText(page, openIdx);
+    await row.locator("label.ann input").click();
+    await page.waitForTimeout(250);
+    const call = await lastCall(page);
+    check("A: checkbox saves typed text", call?.data?.description?.endsWith("❗ Deviation: Pizza with colleagues") === true, JSON.stringify(call?.data));
+    check("A: editor closes", (await row.locator(".editor").count()) === 0);
+    check("A: draft cleared", await page.evaluate(() => Object.keys(localStorage).every((k) => !k.startsWith("todo-annotate-card:draft:"))));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await setup("hell");
+    const row = await rowText(page, openIdx);
+    const other = card(page).locator("li.item").nth(openIdx === 0 ? 1 : 0);
+    await other.locator("label.ann input").click();
+    await page.waitForTimeout(250);
+    const call = await lastCall(page);
+    check("B: other editor saves the first text", call?.data?.item === fixture.items[openIdx].uid && call?.data?.description?.includes("❗ Deviation: Pizza with colleagues"), JSON.stringify(call?.data));
+    check("B: first editor closed", (await row.locator(".editor").count()) === 0);
+    check("B: second editor open", (await other.locator(".editor").count()) === 1);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await setup("hell");
+    const row = await rowText(page, openIdx);
+    await row.locator("label.box.done input").click();
+    await page.waitForTimeout(250);
+    const call = await lastCall(page);
+    check("C: done sends text", call?.data?.description?.includes("❗ Deviation: Pizza with colleagues") === true, JSON.stringify(call?.data));
+    check("C: done sends status", call?.data?.status === "completed" || call?.data?.status === "needs_action");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await setup("hell");
+    const row = await rowText(page, openIdx);
+    const before = await page.evaluate(() => window.__calls.length);
+    await row.locator(".btn:not(.primary):not(.danger)").click();
+    await page.waitForTimeout(100);
+    const after = await page.evaluate(() => window.__calls.length);
+    check("Cancel: no service call", before === after);
+    check("Cancel: editor closed", (await row.locator(".editor").count()) === 0);
+    await row.locator("label.ann input").click();
+    await page.waitForTimeout(80);
+    check("Cancel: draft restored", (await row.locator(".editor .field").inputValue()) === "Pizza with colleagues");
+    await ctx.close();
+  }
+}
+
+// Optional third checkbox. Formats are the ones a sync script should parse.
+{
+  const flag = "⊘ Ausgelassen";
+  const reasonFmt = "⊘ Ausgelassen: {text}";
+  const { ctx, page } = await setup("hell", { config: { skip: true, skip_format: flag } });
+  const rows = card(page).locator("li.item");
+  check("skip: third column", (await rows.nth(openIdx).locator("label.box.skip input").count()) === 1);
+  check("skip: legend entry", (await card(page).locator(".sw.skip").count()) === 1);
+  await rows.nth(openIdx).locator("label.box.skip input").click();
+  await page.waitForTimeout(250);
+  let call = await page.evaluate(() => window.__calls.at(-1));
+  check("skip: flag line and done", call?.data?.description === `${fixture.items[openIdx].description}\n${flag}` && call?.data?.status === "completed", JSON.stringify(call?.data));
+  check("skip: summary untouched", !("summary" in (call?.data ?? {})));
+  await rows.nth(openIdx).locator("label.box.skip input").click();
+  await page.waitForTimeout(250);
+  call = await page.evaluate(() => window.__calls.at(-1));
+  check("skip: uncheck keeps done", call?.data?.description === fixture.items[openIdx].description && call?.data?.status === undefined, JSON.stringify(call?.data));
+  await ctx.close();
+
+  const noted = fixture.items.findIndex((i) => (i.description || "").includes("Deviation"));
+  const { ctx: ctx2, page: page2 } = await setup("hell", { config: { skip: true, skip_format: flag } });
+  const notedRow = card(page2).locator("li.item").nth(noted);
+  await notedRow.locator("label.box.skip input").click();
+  await page2.waitForTimeout(80);
+  check("skip: confirm before replacing a note", (await notedRow.locator(".confirm").count()) === 1);
+  check("skip: confirm sends nothing yet", await page2.evaluate(() => window.__calls.length === 0));
+  await notedRow.locator(".confirm .btn.danger").click();
+  await page2.waitForTimeout(250);
+  call = await page2.evaluate(() => window.__calls.at(-1));
+  check("skip: confirm drops the note", call?.data?.description?.endsWith(`\n${flag}`) && !call.data.description.includes("Deviation"), JSON.stringify(call?.data));
+  await notedRow.locator("label.box.done input").click();
+  await page2.waitForTimeout(250);
+  call = await page2.evaluate(() => window.__calls.at(-1));
+  check("skip: unchecking done removes the flag", call?.data?.status === "needs_action" && !String(call?.data?.description ?? "").includes(flag), JSON.stringify(call?.data));
+  await ctx2.close();
+
+  const { ctx: ctx3, page: page3 } = await setup("hell", { config: { skip: true, skip_format: reasonFmt } });
+  const reasonRow = card(page3).locator("li.item").nth(openIdx);
+  await reasonRow.locator("label.box.skip input").click();
+  await page3.waitForTimeout(80);
+  check("skip: reason format opens an editor", (await reasonRow.locator(".editor").count()) === 1);
+  await reasonRow.locator(".editor .field").fill("keine Zeit");
+  await reasonRow.locator(".btn.primary").click();
+  await page3.waitForTimeout(250);
+  call = await page3.evaluate(() => window.__calls.at(-1));
+  check("skip: reason line", call?.data?.description?.endsWith("\n⊘ Ausgelassen: keine Zeit") && call?.data?.status === "completed", JSON.stringify(call?.data));
+  check("skip: greyed name", (await reasonRow.locator(".skip-mark").count()) === 1 && (await reasonRow.locator(".text").innerText()) === fixture.items[openIdx].summary);
+  await ctx3.close();
 }
 
 await browser.close();

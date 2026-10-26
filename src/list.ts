@@ -1,4 +1,4 @@
-import { parseDescription, type AnnotationFormat } from "./annotation";
+import { parseMarkers, type AnnotationFormat, type SkipFormat } from "./annotation";
 import type { ResolvedConfig } from "./config";
 import type { TodoItem } from "./types";
 
@@ -6,6 +6,8 @@ export interface ViewItem {
   item: TodoItem;
   base: string;
   annotation: string | null;
+  /** null when the item is not skipped (or the third checkbox is off). */
+  skip: string | null;
 }
 export interface ViewGroup {
   key: string;
@@ -32,7 +34,8 @@ const dueValue = (due: string | null | undefined): number => {
 
 export function buildView(items: TodoItem[], cfg: ResolvedConfig): ViewGroup[] {
   const fmt: AnnotationFormat = { template: cfg.format, separator: cfg.separator };
-  let list: ViewItem[] = items.map((item) => ({ item, ...parseDescription(item.description, fmt) }));
+  const skipFmt: SkipFormat | null = cfg.skip && cfg.skip_format ? { template: cfg.skip_format, separator: cfg.separator } : null;
+  let list: ViewItem[] = items.map((item) => ({ item, ...parseMarkers(item.description, fmt, skipFmt) }));
   if (!cfg.show_completed) list = list.filter((v) => v.item.status !== "completed");
 
   const order = new Map(items.map((it, i) => [it.uid, i]));

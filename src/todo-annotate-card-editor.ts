@@ -1,4 +1,5 @@
 import { LitElement, css, html, nothing, type TemplateResult } from "lit";
+import { defaultSkipFormat } from "./annotation";
 import { DEFAULTS } from "./config";
 import { localizer, type Localizer } from "./localize";
 import type { HomeAssistant, TodoAnnotateCardConfig } from "./types";
@@ -74,6 +75,13 @@ export class TodoAnnotateCardEditor extends LitElement {
         { key: "compact", kind: "bool", label: "e_compact" },
       ],
     },
+    {
+      fields: [
+        { key: "skip", kind: "bool", label: "e_skip" },
+        { key: "skip_label", kind: "text", label: "e_skip_label" },
+        { key: "skip_format", kind: "text", label: "e_skip_format" },
+      ],
+    },
   ];
 
   private _field(f: Field): TemplateResult {
@@ -97,13 +105,14 @@ export class TodoAnnotateCardEditor extends LitElement {
         </select>
       </label>`;
     }
+    const placeholder = f.key === "skip_format" ? defaultSkipFormat(this.hass?.locale?.language ?? this.hass?.language) : (f.placeholder ?? "");
     return html`<label class="row" for=${id}>
       <span class="lbl">${t(f.label)}</span>
       <input
         id=${id}
         type="text"
         .value=${(cfg[f.key] as string | undefined) ?? ""}
-        placeholder=${f.placeholder ?? ""}
+        placeholder=${placeholder}
         @change=${(e: Event) => this._set(f.key, (e.target as HTMLInputElement).value)}
       />
     </label>`;

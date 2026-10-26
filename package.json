@@ -1,6 +1,6 @@
 {
   "name": "todo-annotate-card",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Home Assistant Lovelace card: to-do list with a second checkbox to attach a note (e.g. a deviation) to an item.",
   "main": "dist/todo-annotate-card.js",
   "scripts": {

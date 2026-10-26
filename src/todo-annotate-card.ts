@@ -1,19 +1,15 @@
 import { LitElement, css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
-import { DEFAULT_TEMPLATE, decodeText, mergeDescription, type AnnotationFormat } from "./annotation";
+import { decodeText, effectiveSkipFormat, parseMarkers, templateHasPlaceholder, type AnnotationFormat, type SkipFormat } from "./annotation";
 import { resolveConfig, type ResolvedConfig } from "./config";
+import { clearDraft, readDraft, writeDraft } from "./drafts";
+import { applyGesture, type DraftStore, type EditorState, type RowState, type SessionGesture, type SessionPolicy } from "./edit-session";
 import { buildView, dueDay, type ViewItem } from "./list";
 import { localizer, type Localizer } from "./localize";
 import { TodoFeature, type HomeAssistant, type TodoAnnotateCardConfig, type TodoItem } from "./types";
 import "./todo-annotate-card-editor";
 
-export const CARD_VERSION = "1.0.0";
+export const CARD_VERSION = "1.1.0";
 const TAG = "todo-annotate-card";
-
-interface EditState {
-  uid: string;
-  text: string;
-  isNew: boolean;
-}
 
 export class TodoAnnotateCard extends LitElement {
   static properties = {
@@ -24,12 +20,14 @@ export class TodoAnnotateCard extends LitElement {
     _expanded: { state: true },
     _busy: { state: true },
     _error: { state: true },
+    _confirm: { state: true },
   };
 
   hass?: HomeAssistant;
   private _config?: ResolvedConfig;
   private _items?: TodoItem[];
-  private _edit?: EditState;
+  private _edit?: EditorState;
+  private _confirm?: { uid: string; text: string; gesture: SessionGesture };
   private _expanded = new Set<string>();
   private _busy = new Set<string>();
   private _error?: string;
@@ -68,7 +66,48 @@ export class TodoAnnotateCard extends LitElement {
   }
 
   private get _fmt(): AnnotationFormat {
-    return { template: this._config?.format ?? DEFAULT_TEMPLATE, separator: this._config?.separator ?? " / " };
+    const cfg = this._runtime();
+    return { template: cfg?.format ?? "❗ Abweichung: {text}", separator: cfg?.separator ?? " / " };
+  }
+
+  /** Resolved config with the language-specific skip line filled in. */
+  private _runtime(): ResolvedConfig | undefined {
+    if (!this._config) return undefined;
+    if (!this._config.skip) return this._config;
+    const lang = this.hass?.locale?.language ?? this.hass?.language;
+    return { ...this._config, skip_format: effectiveSkipFormat(this._config.skip_format, lang) };
+  }
+
+  private _skipFmt(cfg: ResolvedConfig): SkipFormat | null {
+    return cfg.skip && cfg.skip_format ? { template: cfg.skip_format, separator: cfg.separator } : null;
+  }
+
+  private _policy(): SessionPolicy {
+    const cfg = this._runtime()!;
+    return {
+      autoComplete: cfg.auto_complete,
+      onRemove: cfg.on_remove,
+      annotation: { template: cfg.format, separator: cfg.separator },
+      skip: this._skipFmt(cfg),
+      multiline: cfg.multiline,
+    };
+  }
+
+  private _drafts(): DraftStore {
+    const entity = this._config?.entity ?? "";
+    return { get: (uid, kind) => readDraft(entity, uid, kind) };
+  }
+
+  private _rowOf(v: ViewItem): RowState {
+    return { uid: v.item.uid, status: v.item.status, base: v.base, annotation: v.annotation, skip: v.skip };
+  }
+
+  private _rowByUid(uid: string): RowState | null {
+    const cfg = this._runtime();
+    const item = this._items?.find((it) => it.uid === uid);
+    if (!cfg || !item) return null;
+    const parsed = parseMarkers(item.description, { template: cfg.format, separator: cfg.separator }, this._skipFmt(cfg));
+    return { uid, status: item.status, ...parsed };
   }
 
   connectedCallback(): void {
@@ -89,6 +128,10 @@ export class TodoAnnotateCard extends LitElement {
         field.dataset.focused = "1";
         field.focus();
       }
+    }
+    // Setting `.checked` during render clears `indeterminate` in some browsers.
+    for (const el of this.renderRoot.querySelectorAll<HTMLInputElement>("input[data-pending]")) {
+      el.indeterminate = el.dataset.pending === "1";
     }
   }
 
@@ -138,42 +181,38 @@ export class TodoAnnotateCard extends LitElement {
     }
   }
 
-  private _toggleDone(v: ViewItem): void {
-    void this._update(v.item, { status: v.item.status === "completed" ? "needs_action" : "completed" });
-  }
-
-  private _onAnnotateBox(v: ViewItem, ev: Event): void {
-    // The checkbox mirrors the stored state; the actual change happens via the editor.
-    (ev.target as HTMLInputElement).checked = v.annotation !== null;
-    if (this._edit?.uid === v.item.uid) {
-      this._edit = undefined;
+  private async _dispatch(gesture: SessionGesture): Promise<void> {
+    const cfg = this._config;
+    if (!cfg || !cfg.entity) return;
+    if (this._busy.size && gesture.type !== "input") return;
+    const editor = this._edit ?? null;
+    const plan = applyGesture(editor, editor ? this._rowByUid(editor.uid) : null, gesture, this._policy(), this._drafts());
+    if (plan.confirmRemoveAnnotation && (gesture.type === "skip" || gesture.type === "save")) {
+      this._confirm = { uid: gesture.row.uid, text: plan.confirmRemoveAnnotation.text, gesture };
       return;
     }
-    this._edit = {
-      uid: v.item.uid,
-      text: v.annotation === null ? "" : decodeText(v.annotation, this._fmt, this._config!.multiline),
-      isNew: v.annotation === null,
-    };
-  }
-
-  private async _save(v: ViewItem): Promise<void> {
-    const text = this._edit?.text ?? "";
-    if (!text.trim()) {
-      if (v.annotation !== null) await this._remove(v);
-      else this._edit = undefined;
+    if (plan.forgetDraft) clearDraft(cfg.entity, plan.forgetDraft.uid, plan.forgetDraft.kind);
+    if (plan.remember) writeDraft(cfg.entity, plan.remember.uid, plan.remember.kind, plan.remember.text);
+    if (plan.updates.length === 0) {
+      this._edit = plan.editor ?? undefined;
+      this._confirm = undefined;
       return;
     }
-    const data: { status?: TodoItem["status"]; description: string } = {
-      description: mergeDescription(v.base, text, this._fmt),
-    };
-    if (this._config!.auto_complete && v.item.status !== "completed") data.status = "completed";
-    if (await this._update(v.item, data)) this._edit = undefined;
-  }
-
-  private async _remove(v: ViewItem): Promise<void> {
-    const data: { status?: TodoItem["status"]; description: string } = { description: mergeDescription(v.base, null, this._fmt) };
-    if (this._config!.on_remove === "reopen" && v.item.status === "completed") data.status = "needs_action";
-    if (await this._update(v.item, data)) this._edit = undefined;
+    const previous = this._edit;
+    for (const update of plan.updates) {
+      const item = this._items?.find((it) => it.uid === update.uid);
+      if (!item) return;
+      const data: { status?: TodoItem["status"]; description?: string } = {};
+      if (update.description !== undefined) data.description = update.description;
+      if (update.status) data.status = update.status;
+      if (!(await this._update(item, data))) {
+        this._edit = previous;
+        return;
+      }
+    }
+    for (const update of plan.updates) for (const kind of update.clearDrafts) clearDraft(cfg.entity, update.uid, kind);
+    this._edit = plan.editor ?? undefined;
+    this._confirm = undefined;
   }
 
   private _toggleExpand(uid: string): void {
@@ -186,10 +225,10 @@ export class TodoAnnotateCard extends LitElement {
   private _onEditorKey(v: ViewItem, ev: KeyboardEvent): void {
     if (ev.key === "Escape") {
       ev.preventDefault();
-      this._edit = undefined;
+      void this._dispatch({ type: "cancel" });
     } else if (ev.key === "Enter" && (!this._config!.multiline || ev.ctrlKey || ev.metaKey)) {
       ev.preventDefault();
-      void this._save(v);
+      void this._dispatch({ type: "save", row: this._rowOf(v) });
     }
   }
 
@@ -197,10 +236,11 @@ export class TodoAnnotateCard extends LitElement {
   protected render(): TemplateResult | typeof nothing {
     if (!this._config || !this.hass) return nothing;
     const t = this._t;
-    const cfg = this._config;
+    const cfg = this._runtime()!;
     const stateObj = cfg.entity ? this.hass.states[cfg.entity] : undefined;
     const title = cfg.title ?? (stateObj?.attributes.friendly_name as string | undefined);
     const annLabel = cfg.annotation_label || t("annotate");
+    const skipLabel = cfg.skip_label || t("skipped");
 
     let body: TemplateResult;
     if (!cfg.entity) body = html`<div class="message">${t("no_entity")}</div>`;
@@ -219,6 +259,7 @@ export class TodoAnnotateCard extends LitElement {
                 ? html`<div class="legend" aria-hidden="true">
                     <span class="lg"><span class="sw done"></span>${t("done")}</span>
                     <span class="lg"><span class="sw ann"></span>${cfg.marker ? html`<span class="lg-marker">${cfg.marker}</span>` : nothing}${annLabel}</span>
+                    ${cfg.skip ? html`<span class="lg"><span class="sw skip"></span>${skipLabel}</span>` : nothing}
                   </div>`
                 : nothing}
               ${groups.map(
@@ -226,7 +267,7 @@ export class TodoAnnotateCard extends LitElement {
                   <section class="group" aria-label=${this._groupLabel(g.kind, g.key)}>
                     ${g.kind !== "all" ? html`<h3 class="group-title">${this._groupLabel(g.kind, g.key)}</h3>` : nothing}
                     <ul role="list">
-                      ${g.items.map((v) => this._renderItem(v, annLabel, canEdit, canDescribe))}
+                      ${g.items.map((v) => this._renderItem(v, annLabel, skipLabel, canEdit, canDescribe))}
                     </ul>
                   </section>
                 `,
@@ -234,8 +275,9 @@ export class TodoAnnotateCard extends LitElement {
             `}
       `;
     }
+    const cardClass = [cfg.compact ? "compact" : "", cfg.skip ? "skip-on" : ""].filter(Boolean).join(" ");
     return html`
-      <ha-card class=${cfg.compact ? "compact" : ""}>
+      <ha-card class=${cardClass}>
         ${title ? html`<h1 class="card-header">${title}</h1>` : nothing}
         ${this._error ? html`<div class="message error" role="alert">${this._error}</div>` : nothing}
         <div class="content">${body}</div>
@@ -279,27 +321,38 @@ export class TodoAnnotateCard extends LitElement {
     }
   }
 
-  private _renderItem(v: ViewItem, annLabel: string, canEdit: boolean, canDescribe: boolean): TemplateResult {
+  private _renderItem(v: ViewItem, annLabel: string, skipLabel: string, canEdit: boolean, canDescribe: boolean): TemplateResult {
     const t = this._t;
-    const cfg = this._config!;
+    const cfg = this._runtime()!;
     const it = v.item;
     const done = it.status === "completed";
     const annotated = v.annotation !== null;
+    const skipped = cfg.skip && v.skip !== null;
     const busy = this._busy.has(it.uid);
     const editing = this._edit?.uid === it.uid;
+    const editingNote = editing && this._edit?.kind === "annotation";
+    const editingSkip = editing && this._edit?.kind === "skip";
     const expanded = this._expanded.has(it.uid);
-    // Annotated items show only the note; the base text appears on tap. Normal items follow `description`.
-    const collapsible = annotated ? v.base.length > 0 : cfg.description === "collapsed" && v.base.length > 0;
-    const showBase = v.base.length > 0 && (annotated || cfg.description === "collapsed" ? expanded : cfg.description === "always");
+    const flagged = annotated || skipped;
+    // Annotated and skipped items reveal the plan on tap. Other items follow `description`.
+    const collapsible = flagged ? v.base.length > 0 : cfg.description === "collapsed" && v.base.length > 0;
+    const showBase = v.base.length > 0 && (flagged || cfg.description === "collapsed" ? expanded : cfg.description === "always");
     const detailsId = `d-${cssId(it.uid)}`;
+    const pendingId = `p-${cssId(it.uid)}`;
     const shownAnnotation = annotated ? decodeText(v.annotation!, this._fmt, true) : "";
+    const skipFmt = this._skipFmt(cfg);
+    const skipReason = skipped && v.skip && skipFmt && templateHasPlaceholder(skipFmt.template) ? decodeText(v.skip, skipFmt, true) : "";
+    const confirming = this._confirm?.uid === it.uid;
 
     const main = html`
       <span class="summary">
-        ${annotated && cfg.marker ? html`<span class="marker" aria-hidden="true">${cfg.marker}</span>` : nothing}
+        ${skipped ? html`<span class="marker skip-mark" aria-hidden="true">⊘</span>` : nothing}
+        ${annotated && !skipped && cfg.marker ? html`<span class="marker" aria-hidden="true">${cfg.marker}</span>` : nothing}
         <span class="text">${it.summary}</span>
         ${annotated ? html`<span class="sr-only">(${annLabel})</span>` : nothing}
+        ${skipped ? html`<span class="sr-only">(${skipLabel}${skipReason ? `: ${skipReason}` : ""})</span>` : nothing}
       </span>
+      ${skipped ? html`<span class="skip-hint">${skipLabel}${skipReason ? `: ${skipReason}` : ""}</span>` : nothing}
       ${annotated ? html`<span class="annotation">${shownAnnotation}</span>` : nothing}
       ${cfg.show_due && it.due && (cfg.group_by !== "due_day" || !/^\d{4}-\d{2}-\d{2}$/.test(it.due))
         ? html`<span class="due">${this._formatDue(it.due)}</span>`
@@ -307,29 +360,47 @@ export class TodoAnnotateCard extends LitElement {
     `;
 
     return html`
-      <li class="item ${done ? "done" : ""} ${annotated ? "annotated" : ""} ${busy ? "busy" : ""}" aria-busy=${busy ? "true" : "false"}>
-        <label class="box" title=${t("done")}>
+      <li class="item ${done ? "done" : ""} ${annotated ? "annotated" : ""} ${skipped ? "skipped" : ""} ${busy ? "busy" : ""}" aria-busy=${busy ? "true" : "false"}>
+        <label class="box done" title=${t("done")}>
           <input
             type="checkbox"
             .checked=${done}
             ?disabled=${!canEdit || busy}
             aria-label=${`${t("done")}: ${it.summary}`}
-            @change=${() => this._toggleDone(v)}
+            @change=${() => void this._dispatch({ type: "done", row: this._rowOf(v) })}
           />
         </label>
-        <label class="box ann" title=${annLabel}>
+        <label class="box ann" title=${editingNote ? t("unsaved") : annLabel}>
           <input
             type="checkbox"
+            data-pending=${editingNote ? "1" : "0"}
             .checked=${annotated}
+            .indeterminate=${editingNote}
             ?disabled=${!canEdit || !canDescribe || busy}
-            aria-label=${`${annLabel}: ${it.summary}`}
-            aria-expanded=${editing ? "true" : "false"}
-            @change=${(ev: Event) => this._onAnnotateBox(v, ev)}
+            aria-label=${editingNote ? `${annLabel}: ${it.summary}. ${t("unsaved")}` : `${annLabel}: ${it.summary}`}
+            aria-expanded=${editingNote ? "true" : "false"}
+            aria-describedby=${editingNote ? pendingId : nothing}
+            @change=${() => void this._dispatch({ type: "annotate", row: this._rowOf(v) })}
           />
           ${cfg.annotation_icon && cfg.show_header === false
             ? html`<ha-icon class="ann-icon" .icon=${cfg.annotation_icon} aria-hidden="true"></ha-icon>`
             : nothing}
         </label>
+        ${cfg.skip
+          ? html`<label class="box skip" title=${editingSkip ? t("unsaved") : skipLabel}>
+              <input
+                type="checkbox"
+                data-pending=${editingSkip ? "1" : "0"}
+                .checked=${!!skipped}
+                .indeterminate=${editingSkip}
+                ?disabled=${!canEdit || !canDescribe || busy}
+                aria-label=${editingSkip ? `${skipLabel}: ${it.summary}. ${t("unsaved")}` : `${skipLabel}: ${it.summary}`}
+                aria-expanded=${editingSkip ? "true" : "false"}
+                aria-describedby=${editingSkip ? pendingId : nothing}
+                @change=${() => void this._dispatch({ type: "skip", row: this._rowOf(v) })}
+              />
+            </label>`
+          : nothing}
         <div class="body">
           ${collapsible
             ? html`<button
@@ -346,33 +417,71 @@ export class TodoAnnotateCard extends LitElement {
           ${showBase ? html`<div class="base" id=${detailsId}>${v.base}</div>` : nothing}
           ${annotated && expanded && !editing && canEdit && canDescribe
             ? html`<div class="actions inline">
-                <button type="button" class="link" @click=${() => this._onAnnotateBox(v, { target: { checked: true } } as unknown as Event)}>
+                <button type="button" class="link" @click=${() => void this._dispatch({ type: "annotate", row: this._rowOf(v) })}>
                   ${t("edit", { label: annLabel })}
                 </button>
               </div>`
             : nothing}
-          ${editing ? this._renderEditor(v, annLabel) : nothing}
+          ${skipped && expanded && !editing && canEdit && canDescribe && skipFmt && templateHasPlaceholder(skipFmt.template)
+            ? html`<div class="actions inline">
+                <button type="button" class="link" @click=${() => void this._dispatch({ type: "edit-skip", row: this._rowOf(v) })}>
+                  ${t("edit", { label: skipLabel })}
+                </button>
+              </div>`
+            : nothing}
+          ${confirming ? this._renderConfirm() : nothing}
+          ${editing ? this._renderEditor(v, editingSkip ? skipLabel : annLabel, pendingId) : nothing}
         </div>
       </li>
     `;
   }
 
-  private _renderEditor(v: ViewItem, annLabel: string): TemplateResult {
+  private _renderConfirm(): TemplateResult {
     const t = this._t;
-    const cfg = this._config!;
-    const busy = this._busy.has(v.item.uid);
-    const onInput = (ev: Event) => {
-      this._edit = { ...this._edit!, text: (ev.target as HTMLInputElement).value };
-    };
+    const text = this._confirm?.text ?? "";
+    const gesture = this._confirm?.gesture;
     return html`
-      <div class="editor" role="group" aria-label=${`${annLabel}: ${v.item.summary}`}>
+      <div class="confirm" role="alertdialog" aria-label=${t("confirm_remove")}>
+        <p>${t("confirm_remove_note", { text })}</p>
+        <div class="actions">
+          <span class="spacer"></span>
+          <button type="button" class="btn" @click=${() => (this._confirm = undefined)}>${t("cancel")}</button>
+          <button
+            type="button"
+            class="btn danger"
+            @click=${() => {
+              if (!gesture || (gesture.type !== "skip" && gesture.type !== "save")) return;
+              void this._dispatch({ ...gesture, confirmed: true });
+            }}
+          >
+            ${t("confirm_remove")}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  private _renderEditor(v: ViewItem, label: string, pendingId: string): TemplateResult {
+    const t = this._t;
+    const cfg = this._runtime()!;
+    const busy = this._busy.has(v.item.uid);
+    const kind = this._edit?.kind ?? "annotation";
+    const placeholder = kind === "skip" ? t("skip_placeholder") : t("placeholder");
+    const onInput = (ev: Event) => {
+      void this._dispatch({ type: "input", text: (ev.target as HTMLInputElement).value });
+    };
+    // An explicit Save of a skip reason may be empty (the line itself marks the item).
+    const saveDisabled = busy || (kind === "annotation" && !this._edit!.text.trim());
+    return html`
+      <div class="editor" role="group" aria-label=${`${label}: ${v.item.summary}`}>
+        <p class="pending" id=${pendingId} role="status">${t("unsaved")}</p>
         ${cfg.multiline
           ? html`<textarea
               class="field"
               rows="2"
               .value=${this._edit!.text}
-              placeholder=${t("placeholder")}
-              aria-label=${annLabel}
+              placeholder=${placeholder}
+              aria-label=${label}
               ?disabled=${busy}
               @input=${onInput}
               @keydown=${(ev: KeyboardEvent) => this._onEditorKey(v, ev)}
@@ -381,19 +490,19 @@ export class TodoAnnotateCard extends LitElement {
               class="field"
               type="text"
               .value=${this._edit!.text}
-              placeholder=${t("placeholder")}
-              aria-label=${annLabel}
+              placeholder=${placeholder}
+              aria-label=${label}
               ?disabled=${busy}
               @input=${onInput}
               @keydown=${(ev: KeyboardEvent) => this._onEditorKey(v, ev)}
             />`}
         <div class="actions">
           ${!this._edit!.isNew
-            ? html`<button type="button" class="btn danger" ?disabled=${busy} @click=${() => this._remove(v)}>${t("remove", { label: annLabel })}</button>`
+            ? html`<button type="button" class="btn danger" ?disabled=${busy} @click=${() => void this._dispatch({ type: "remove", row: this._rowOf(v) })}>${t("remove", { label })}</button>`
             : nothing}
           <span class="spacer"></span>
-          <button type="button" class="btn" ?disabled=${busy} @click=${() => (this._edit = undefined)}>${t("cancel")}</button>
-          <button type="button" class="btn primary" ?disabled=${busy || !this._edit!.text.trim()} @click=${() => this._save(v)}>
+          <button type="button" class="btn" ?disabled=${busy} @click=${() => void this._dispatch({ type: "cancel" })}>${t("cancel")}</button>
+          <button type="button" class="btn primary" ?disabled=${saveDisabled} @click=${() => void this._dispatch({ type: "save", row: this._rowOf(v) })}>
             ${t("save")}
           </button>
         </div>
@@ -466,6 +575,9 @@ export class TodoAnnotateCard extends LitElement {
     .sw.ann {
       background: var(--tac-marker-color);
     }
+    .sw.skip {
+      background: var(--secondary-text-color);
+    }
     .lg-marker {
       margin-right: -2px;
     }
@@ -508,6 +620,9 @@ export class TodoAnnotateCard extends LitElement {
     }
     .box.ann input {
       accent-color: var(--tac-marker-color);
+    }
+    .box.skip input {
+      accent-color: var(--secondary-text-color);
     }
     .box input:disabled {
       cursor: default;
@@ -577,6 +692,19 @@ export class TodoAnnotateCard extends LitElement {
       text-decoration: none;
       color: var(--primary-text-color);
     }
+    .item.skipped .text {
+      color: var(--secondary-text-color);
+      text-decoration: none;
+    }
+    .skip-mark {
+      color: var(--secondary-text-color);
+    }
+    .skip-hint {
+      flex: 1 1 100%;
+      color: var(--secondary-text-color);
+      font-size: 0.9rem;
+      word-break: break-word;
+    }
     .annotation {
       flex: 1 1 100%;
       color: var(--primary-text-color);
@@ -603,6 +731,22 @@ export class TodoAnnotateCard extends LitElement {
     }
     .editor {
       padding: 2px 0 12px;
+    }
+    .pending {
+      margin: 0 0 6px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--tac-marker-color);
+    }
+    .confirm {
+      margin: 0 0 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--warning-color, #ff9800) 14%, transparent);
+    }
+    .confirm p {
+      margin: 0;
+      word-break: break-word;
     }
     .field {
       width: 100%;
@@ -681,6 +825,12 @@ export class TodoAnnotateCard extends LitElement {
     .compact .item {
       grid-template-columns: 38px 38px 1fr;
     }
+    .skip-on .item {
+      grid-template-columns: 44px 44px 44px 1fr;
+    }
+    .compact.skip-on .item {
+      grid-template-columns: 38px 38px 38px 1fr;
+    }
   `;
 }
 
@@ -703,7 +853,7 @@ if (!window.customCards.some((c) => c.type === TAG)) {
   window.customCards.push({
     type: TAG,
     name: "Todo Annotate Card",
-    description: "To-do list with a second checkbox to attach a note (e.g. a deviation) to an item.",
+    description: "To-do list with a note checkbox and an optional skipped checkbox.",
     preview: true,
     documentationURL: "https://github.com/LuFuhrmann/todo-annotate-card",
   });
