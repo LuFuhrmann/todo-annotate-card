@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
-import { decodeText, effectiveSkipFormat, parseMarkers, templateHasPlaceholder, type AnnotationFormat, type SkipFormat } from "./annotation";
+import { decodeText, effectiveSkipFormat, mergeMarkers, parseMarkers, templateHasPlaceholder, type AnnotationFormat, type SkipFormat } from "./annotation";
 import { resolveConfig, type ResolvedConfig } from "./config";
+import { applyChoice, clearChoice, dishesForSlot, dishInfo, displayNote, orderForDay, parseChoice, plannedDishId, readDishes, readHints, slotOf, splitDishRef, withDishRef, type Dish, type ItemHint } from "./dishes";
 import { clearDraft, readDraft, writeDraft } from "./drafts";
 import { applyGesture, type DraftStore, type EditorState, type RowState, type SessionGesture, type SessionPolicy } from "./edit-session";
 import { buildView, dueDay, type ViewItem } from "./list";
@@ -8,7 +9,7 @@ import { localizer, type Localizer } from "./localize";
 import { TodoFeature, type HomeAssistant, type TodoAnnotateCardConfig, type TodoItem } from "./types";
 import "./todo-annotate-card-editor";
 
-export const CARD_VERSION = "1.1.0";
+export const CARD_VERSION = "1.2.0";
 const TAG = "todo-annotate-card";
 
 export class TodoAnnotateCard extends LitElement {
@@ -21,6 +22,8 @@ export class TodoAnnotateCard extends LitElement {
     _busy: { state: true },
     _error: { state: true },
     _confirm: { state: true },
+    _picker: { state: true },
+    _pickFilter: { state: true },
   };
 
   hass?: HomeAssistant;
@@ -29,6 +32,10 @@ export class TodoAnnotateCard extends LitElement {
   private _edit?: EditorState;
   private _confirm?: { uid: string; text: string; gesture: SessionGesture };
   private _expanded = new Set<string>();
+  /** uid of the item whose dish picker is open. */
+  private _picker?: string;
+  private _pickFilter = "";
+  private _dishCache?: { attrs: unknown; dishes: Dish[]; hints: Map<string, ItemHint> };
   private _busy = new Set<string>();
   private _error?: string;
   private _unsub?: Promise<() => unknown>;
@@ -91,6 +98,51 @@ export class TodoAnnotateCard extends LitElement {
       skip: this._skipFmt(cfg),
       multiline: cfg.multiline,
     };
+  }
+
+  private get _lang(): string | undefined {
+    return this.hass?.locale?.language ?? this.hass?.language;
+  }
+
+  /** Dish catalog from `dishes_entity` (cached per attributes object). */
+  private _dishes(): Dish[] {
+    const id = this._config?.dishes_entity;
+    if (!id) return [];
+    const attrs = this.hass?.states[id]?.attributes;
+    if (!this._dishCache || this._dishCache.attrs !== attrs) this._dishCache = { attrs, dishes: readDishes(attrs), hints: readHints(attrs) };
+    return this._dishCache!.dishes;
+  }
+
+  private _hint(summary: string): ItemHint | undefined {
+    this._dishes();
+    return this._dishCache?.hints.get(summary);
+  }
+
+  private _slotDishes(v: ViewItem): { slot: string | null; dishes: Dish[] } {
+    const slot = slotOf(v.item.summary, this._config?.dish_slot_pattern);
+    return { slot, dishes: dishesForSlot(this._dishes(), slot) };
+  }
+
+  /** Writes the chosen dish (or the original plan for `null`) into the item description. */
+  private async _choose(v: ViewItem, dish: Dish | null): Promise<void> {
+    const cfg = this._runtime()!;
+    const pc = parseChoice(v.base);
+    // Picking the dish the plan already has, with no earlier change, changes nothing.
+    if (dish && !pc.choice && dish.id === plannedDishId(pc.text, this._dishes(), this._hint(v.item.summary))) {
+      this._togglePicker(v.item.uid);
+      return;
+    }
+    const base = dish ? applyChoice(v.base, dish, this._lang) : clearChoice(v.base);
+    const description = mergeMarkers(base, v.annotation, v.skip, this._fmt, this._skipFmt(cfg));
+    if (await this._update(v.item, { description })) {
+      this._picker = undefined;
+      this._pickFilter = "";
+    }
+  }
+
+  private _togglePicker(uid: string): void {
+    this._pickFilter = "";
+    this._picker = this._picker === uid ? undefined : uid;
   }
 
   private _drafts(): DraftStore {
@@ -185,6 +237,7 @@ export class TodoAnnotateCard extends LitElement {
     const cfg = this._config;
     if (!cfg || !cfg.entity) return;
     if (this._busy.size && gesture.type !== "input") return;
+    if (gesture.type !== "input") this._picker = undefined;
     const editor = this._edit ?? null;
     const plan = applyGesture(editor, editor ? this._rowByUid(editor.uid) : null, gesture, this._policy(), this._drafts());
     if (plan.confirmRemoveAnnotation && (gesture.type === "skip" || gesture.type === "save")) {
@@ -252,6 +305,9 @@ export class TodoAnnotateCard extends LitElement {
       const groups = buildView(this._items, cfg);
       body = html`
         ${!canDescribe ? html`<div class="message warning" role="note">${t("unsupported")}</div>` : nothing}
+        ${cfg.dishes_entity && !this.hass.states[cfg.dishes_entity]
+          ? html`<div class="message muted" role="note">${t("dishes_missing", { entity: cfg.dishes_entity })}</div>`
+          : nothing}
         ${groups.length === 0
           ? html`<div class="message muted">${t("no_items")}</div>`
           : html`
@@ -275,7 +331,8 @@ export class TodoAnnotateCard extends LitElement {
             `}
       `;
     }
-    const cardClass = [cfg.compact ? "compact" : "", cfg.skip ? "skip-on" : ""].filter(Boolean).join(" ");
+    const replanOn = !!cfg.dishes_entity && cfg.replan;
+    const cardClass = [cfg.compact ? "compact" : "", cfg.skip ? "skip-on" : "", replanOn ? "replan-on" : ""].filter(Boolean).join(" ");
     return html`
       <ha-card class=${cardClass}>
         ${title ? html`<h1 class="card-header">${title}</h1>` : nothing}
@@ -334,12 +391,21 @@ export class TodoAnnotateCard extends LitElement {
     const editingSkip = editing && this._edit?.kind === "skip";
     const expanded = this._expanded.has(it.uid);
     const flagged = annotated || skipped;
+    // A chosen dish replaces the plan text; the original plan is shown on tap.
+    const pc = parseChoice(v.base);
+    const baseText = pc.text;
+    const original = pc.choice ? pc.original : null;
     // Annotated and skipped items reveal the plan on tap. Other items follow `description`.
-    const collapsible = flagged ? v.base.length > 0 : cfg.description === "collapsed" && v.base.length > 0;
-    const showBase = v.base.length > 0 && (flagged || cfg.description === "collapsed" ? expanded : cfg.description === "always");
+    const collapsible = (flagged ? baseText.length > 0 : cfg.description === "collapsed" && baseText.length > 0) || !!original;
+    const showBase = baseText.length > 0 && (flagged || cfg.description === "collapsed" ? expanded : cfg.description === "always");
+    const replanOn = !!cfg.dishes_entity && cfg.replan;
+    const sd = replanOn ? this._slotDishes(v) : { slot: null, dishes: [] as Dish[] };
+    const canReplan = replanOn && !done && !skipped && canEdit && canDescribe && (sd.dishes.length > 0 || !!pc.choice);
+    const picking = this._picker === it.uid && canReplan;
+    const replanLabel = cfg.replan_label || t("replan");
     const detailsId = `d-${cssId(it.uid)}`;
     const pendingId = `p-${cssId(it.uid)}`;
-    const shownAnnotation = annotated ? decodeText(v.annotation!, this._fmt, true) : "";
+    const shownAnnotation = annotated ? displayNote(decodeText(v.annotation!, this._fmt, true)) : "";
     const skipFmt = this._skipFmt(cfg);
     const skipReason = skipped && v.skip && skipFmt && templateHasPlaceholder(skipFmt.template) ? decodeText(v.skip, skipFmt, true) : "";
     const confirming = this._confirm?.uid === it.uid;
@@ -352,6 +418,7 @@ export class TodoAnnotateCard extends LitElement {
         ${annotated ? html`<span class="sr-only">(${annLabel})</span>` : nothing}
         ${skipped ? html`<span class="sr-only">(${skipLabel}${skipReason ? `: ${skipReason}` : ""})</span>` : nothing}
       </span>
+      ${pc.choice ? html`<span class="choice"><span aria-hidden="true">🔁 </span>${t("chosen", { name: pc.choice.name })}</span>` : nothing}
       ${skipped ? html`<span class="skip-hint">${skipLabel}${skipReason ? `: ${skipReason}` : ""}</span>` : nothing}
       ${annotated ? html`<span class="annotation">${shownAnnotation}</span>` : nothing}
       ${cfg.show_due && it.due && (cfg.group_by !== "due_day" || !/^\d{4}-\d{2}-\d{2}$/.test(it.due))
@@ -414,7 +481,11 @@ export class TodoAnnotateCard extends LitElement {
                 ${main}<span class="chev" aria-hidden="true">${expanded ? "▴" : "▾"}</span>
               </button>`
             : html`<div class="main">${main}</div>`}
-          ${showBase ? html`<div class="base" id=${detailsId}>${v.base}</div>` : nothing}
+          ${showBase || (original && expanded)
+            ? html`<div class="base" id=${detailsId}>${showBase ? baseText : nothing}${original && expanded
+                ? html`<div class="original">${t("original_plan", { text: original })}</div>`
+                : nothing}</div>`
+            : nothing}
           ${annotated && expanded && !editing && canEdit && canDescribe
             ? html`<div class="actions inline">
                 <button type="button" class="link" @click=${() => void this._dispatch({ type: "annotate", row: this._rowOf(v) })}>
@@ -430,8 +501,24 @@ export class TodoAnnotateCard extends LitElement {
               </div>`
             : nothing}
           ${confirming ? this._renderConfirm() : nothing}
+          ${picking ? this._renderPicker(v, sd.slot, sd.dishes, pc.choice?.id ?? null) : nothing}
           ${editing ? this._renderEditor(v, editingSkip ? skipLabel : annLabel, pendingId) : nothing}
         </div>
+        ${replanOn
+          ? canReplan
+            ? html`<div class="box replan">
+                <button
+                  type="button"
+                  class="replan-btn ${pc.choice ? "chosen" : ""}"
+                  title=${replanLabel}
+                  aria-label=${`${replanLabel}: ${it.summary}`}
+                  aria-expanded=${picking ? "true" : "false"}
+                  ?disabled=${busy || editing}
+                  @click=${() => this._togglePicker(it.uid)}
+                >⇄</button>
+              </div>`
+            : html`<div class="box replan" aria-hidden="true"></div>`
+          : nothing}
       </li>
     `;
   }
@@ -461,6 +548,97 @@ export class TodoAnnotateCard extends LitElement {
     `;
   }
 
+  private _renderPicker(v: ViewItem, slot: string | null, dishes: Dish[], current: string | null): TemplateResult {
+    const t = this._t;
+    const busy = this._busy.has(v.item.uid);
+    const f = this._pickFilter.trim().toLocaleLowerCase();
+    const hint = this._hint(v.item.summary);
+    const pc = parseChoice(v.base);
+    const planned = plannedDishId(pc.choice ? (pc.original ?? "") : pc.text, this._dishes(), hint);
+    const rows = orderForDay(dishes, hint?.tag);
+    const shown = f ? rows.filter((r) => `${r.dish.name} ${r.dish.kurz ?? ""} ${r.dish.ort ?? ""}`.toLocaleLowerCase().includes(f)) : rows;
+    const dayLabel = (tag: string) => (tag === "training" ? t("day_training") : tag === "ruhe" || tag === "rest" ? t("day_rest") : tag);
+    const title = t("replan_title", { slot: slot ?? v.item.summary });
+    return html`
+      <div class="picker" role="group" aria-label=${`${title}: ${v.item.summary}`}>
+        <p class="picker-title">${title}</p>
+        ${dishes.length > 6
+          ? html`<input
+              class="field filter"
+              type="search"
+              .value=${this._pickFilter}
+              placeholder=${t("replan_filter")}
+              aria-label=${t("replan_filter")}
+              @input=${(ev: Event) => (this._pickFilter = (ev.target as HTMLInputElement).value)}
+            />`
+          : nothing}
+        <ul class="dishes" role="list">
+          ${shown.map(
+            ({ dish: d, fits }) => html`<li>
+              <button
+                type="button"
+                class="dish ${d.id === current ? "current" : ""}"
+                aria-pressed=${d.id === current ? "true" : "false"}
+                ?disabled=${busy}
+                @click=${() => void this._choose(v, d)}
+              >
+                <span class="dish-name"
+                  >${d.name}${d.id === current
+                    ? html` <span class="dish-cur">· ${t("replan_current")}</span>`
+                    : d.id === planned
+                      ? html` <span class="dish-cur">· ${t("replan_planned")}</span>`
+                      : nothing}</span
+                >
+                ${!fits ? html`<span class="dish-day">${t("dish_other_day", { days: d.tage.map(dayLabel).join(", ") })}</span>` : nothing}
+                ${dishInfo(d, this._lang) ? html`<span class="dish-info">${dishInfo(d, this._lang)}</span>` : nothing}
+                ${d.kurz ? html`<span class="dish-kurz">${d.kurz}</span>` : nothing}
+              </button>
+            </li>`,
+          )}
+        </ul>
+        ${shown.length === 0 ? html`<p class="message muted">${t("replan_none")}</p>` : nothing}
+        <div class="actions">
+          ${current
+            ? html`<button type="button" class="btn danger" ?disabled=${busy} @click=${() => void this._choose(v, null)}>${t("replan_back")}</button>`
+            : nothing}
+          <span class="spacer"></span>
+          <button type="button" class="btn" ?disabled=${busy} @click=${() => this._togglePicker(v.item.uid)}>${t("cancel")}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  /** Dish list in the note editor: picking sets the `[id] Name` line, free text stays. */
+  private _renderDishSelect(v: ViewItem): TemplateResult | typeof nothing {
+    const cfg = this._runtime()!;
+    if (!cfg.dishes_entity || !cfg.dish_in_note || this._edit?.kind !== "annotation") return nothing;
+    const all = this._dishes();
+    if (!all.length) return nothing;
+    const t = this._t;
+    const { slot, dishes } = this._slotDishes(v);
+    const fit = new Set(dishes.map((d) => d.id));
+    const others = all.filter((d) => !fit.has(d.id));
+    const joiner = cfg.multiline ? "\n" : cfg.separator;
+    const text = this._edit!.text;
+    const firstLine = (cfg.multiline ? text.split("\n") : text.split(cfg.separator))[0] ?? "";
+    const cur = splitDishRef(firstLine).ref?.id ?? "";
+    const onChange = (ev: Event) => {
+      const sel = ev.target as HTMLSelectElement;
+      const d = all.find((x) => x.id === sel.value) ?? null;
+      if (sel.value === "" && !cur) return;
+      void this._dispatch({ type: "input", text: withDishRef(this._edit?.text ?? "", d, all, joiner) });
+    };
+    const opt = (d: Dish) => {
+      const info = dishInfo(d, this._lang);
+      return html`<option value=${d.id} ?selected=${d.id === cur}>${info ? `${d.name} (${info})` : d.name}</option>`;
+    };
+    return html`<select class="field dish-select" aria-label=${t("dish_pick")} @change=${onChange}>
+      <option value="" ?selected=${!cur}>${cur ? t("dish_pick_none") : t("dish_pick")}</option>
+      ${dishes.length ? html`<optgroup label=${t("dish_group_slot", { slot: slot ?? "" })}>${dishes.map(opt)}</optgroup>` : nothing}
+      ${others.length ? html`<optgroup label=${t("dish_group_other")}>${others.map(opt)}</optgroup>` : nothing}
+    </select>`;
+  }
+
   private _renderEditor(v: ViewItem, label: string, pendingId: string): TemplateResult {
     const t = this._t;
     const cfg = this._runtime()!;
@@ -475,6 +653,7 @@ export class TodoAnnotateCard extends LitElement {
     return html`
       <div class="editor" role="group" aria-label=${`${label}: ${v.item.summary}`}>
         <p class="pending" id=${pendingId} role="status">${t("unsaved")}</p>
+        ${this._renderDishSelect(v)}
         ${cfg.multiline
           ? html`<textarea
               class="field"
@@ -803,6 +982,111 @@ export class TodoAnnotateCard extends LitElement {
       padding: 0 4px;
       min-height: 32px;
     }
+    .choice {
+      flex: 1 1 100%;
+      color: var(--primary-color);
+      font-size: 0.9rem;
+      font-weight: 500;
+      word-break: break-word;
+    }
+    .original {
+      margin-top: 6px;
+      font-style: italic;
+    }
+    .box.replan {
+      align-self: start;
+    }
+    .replan-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 18px;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.4));
+      background: transparent;
+      color: var(--primary-color);
+      font: inherit;
+      font-size: 1.1rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .replan-btn.chosen {
+      background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+      border-color: var(--primary-color);
+    }
+    .replan-btn:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    .replan-btn:focus-visible,
+    .dish:focus-visible,
+    .dish-select:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
+    }
+    .picker {
+      padding: 2px 0 12px;
+    }
+    .picker-title {
+      margin: 0 0 6px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--secondary-text-color);
+    }
+    .filter {
+      margin-bottom: 6px;
+    }
+    .dishes li + li {
+      margin-top: 6px;
+    }
+    .dish {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      width: 100%;
+      min-height: 44px;
+      box-sizing: border-box;
+      padding: 8px 12px;
+      text-align: left;
+      font: inherit;
+      color: var(--primary-text-color);
+      background: var(--input-fill-color, var(--secondary-background-color, rgba(127, 127, 127, 0.08)));
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.3));
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .dish.current {
+      border-color: var(--primary-color);
+      box-shadow: inset 0 0 0 1px var(--primary-color);
+    }
+    .dish:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .dish-name {
+      font-weight: 500;
+    }
+    .dish-cur {
+      color: var(--primary-color);
+      font-weight: 400;
+    }
+    .dish-info {
+      font-size: 0.8rem;
+      color: var(--secondary-text-color);
+    }
+    .dish-day {
+      font-size: 0.8rem;
+      color: var(--warning-color, #ff9800);
+    }
+    .dish-kurz {
+      font-size: 0.85rem;
+      color: var(--secondary-text-color);
+      word-break: break-word;
+    }
+    .dish-select {
+      margin-bottom: 8px;
+      padding: 8px 10px;
+      font-size: 16px;
+    }
     .sr-only {
       position: absolute;
       width: 1px;
@@ -831,6 +1115,18 @@ export class TodoAnnotateCard extends LitElement {
     .compact.skip-on .item {
       grid-template-columns: 38px 38px 38px 1fr;
     }
+    .replan-on .item {
+      grid-template-columns: 44px 44px 1fr 44px;
+    }
+    .replan-on.skip-on .item {
+      grid-template-columns: 44px 44px 44px 1fr 44px;
+    }
+    .compact.replan-on .item {
+      grid-template-columns: 38px 38px 1fr 40px;
+    }
+    .compact.replan-on.skip-on .item {
+      grid-template-columns: 38px 38px 38px 1fr 40px;
+    }
   `;
 }
 
@@ -853,7 +1149,7 @@ if (!window.customCards.some((c) => c.type === TAG)) {
   window.customCards.push({
     type: TAG,
     name: "Todo Annotate Card",
-    description: "To-do list with a note checkbox and an optional skipped checkbox.",
+    description: "To-do list with a note checkbox, an optional skipped checkbox and an optional dish list.",
     preview: true,
     documentationURL: "https://github.com/LuFuhrmann/todo-annotate-card",
   });

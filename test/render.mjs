@@ -51,15 +51,15 @@ const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-san
 const results = [];
 const check = (name, ok, info = "") => { results.push({ name, ok }); console.log(`${ok ? "PASS" : "FAIL"} ${name}${info ? " – " + info : ""}`); };
 
-async function setup(theme, { editor = false, features = 127, config = {} } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, timezoneId: "Europe/Berlin", locale: fixture.language === "de" ? "de-DE" : "en-US", colorScheme: theme === "dunkel" ? "dark" : "light" });
+async function setup(theme, { editor = false, features = 127, config = {}, fx = fixture, extraStates = {} } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, timezoneId: "Europe/Berlin", locale: fx.language === "de" ? "de-DE" : "en-US", colorScheme: theme === "dunkel" ? "dark" : "light" });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   await page.goto(base);
   await page.waitForFunction(() => customElements.get("todo-annotate-card"));
-  await page.evaluate(({ vars, fixture, editor, features, config }) => {
+  await page.evaluate(({ vars, fixture, editor, features, config, extraStates }) => {
     for (const [k, v] of Object.entries(vars)) document.documentElement.style.setProperty(k, v);
     let items = structuredClone(fixture.items);
     const subs = new Set();
@@ -68,7 +68,7 @@ async function setup(theme, { editor = false, features = 127, config = {} } = {}
     const hass = {
       language: fixture.language, locale: { language: fixture.language },
       states: { [fixture.entity]: { entity_id: fixture.entity, state: String(items.filter((i) => i.status === "needs_action").length), attributes: { friendly_name: fixture.friendly_name, supported_features: features } },
-                "todo.einkauf": { entity_id: "todo.einkauf", state: "0", attributes: { friendly_name: "Einkauf", supported_features: 127 } } },
+                "todo.einkauf": { entity_id: "todo.einkauf", state: "0", attributes: { friendly_name: "Einkauf", supported_features: 127 } }, ...extraStates },
       connection: { subscribeMessage: async (cb, msg) => { subs.add(cb); setTimeout(() => cb({ items: structuredClone(items) }), 0); return () => subs.delete(cb); } },
       callService: async (domain, service, data, target) => {
         window.__calls.push({ domain, service, data, target });
@@ -89,7 +89,7 @@ async function setup(theme, { editor = false, features = 127, config = {} } = {}
       card.setConfig({ type: "custom:todo-annotate-card", entity: fixture.entity, ...fixture.config, ...config });
       card.hass = hass; host.appendChild(card);
     }
-  }, { vars: THEMES[theme], fixture, editor, features, config });
+  }, { vars: THEMES[theme], fixture: fx, editor, features, config, extraStates });
   await page.waitForTimeout(200);
   return { ctx, page, errors };
 }
@@ -319,6 +319,127 @@ for (const theme of ["hell", "dunkel"]) {
   check("skip: reason line", call?.data?.description?.endsWith("\n⊘ Ausgelassen: keine Zeit") && call?.data?.status === "completed", JSON.stringify(call?.data));
   check("skip: greyed name", (await reasonRow.locator(".skip-mark").count()) === 1 && (await reasonRow.locator(".text").innerText()) === fixture.items[openIdx].summary);
   await ctx3.close();
+}
+
+// Dish catalog (v1.2): change dish and pick a dish in the note editor.
+// DISH_FIXTURE / DISH_PREFIX run the same checks on private data (e.g. the real catalog).
+{
+  const fxPath = process.env.DISH_FIXTURE || resolve(root, "test/fixtures/gerichte-demo.json");
+  const fx = JSON.parse(readFileSync(fxPath, "utf8"));
+  const dprefix = process.env.DISH_PREFIX || "gerichte";
+  const catalog = JSON.parse(readFileSync(resolve(dirname(fxPath), fx.catalog), "utf8"));
+  // Same compact attributes as the sync script publishes (no zubereitung/zutaten).
+  const keep = ["id", "name", "slots", "kcal", "eiweiss_g", "geschaetzt", "zeit_min", "ort", "tage", "kurz"];
+  const gerichte = catalog.gerichte.map((g) => Object.fromEntries(keep.filter((k) => k in g).map((k) => [k, g[k]])));
+  const attrs = { friendly_name: "Gerichte", stand: catalog.stand, slots: catalog.slots, gerichte, punkte: fx.punkte ?? {} };
+  const extraStates = { [fx.dishes_entity]: { entity_id: fx.dishes_entity, state: catalog.stand, attributes: attrs } };
+  const C = fx.dish_checks;
+  const idx = (uid) => fx.items.findIndex((i) => i.uid === uid);
+  const lunch = idx(C.lunch), post = idx(C.post), done = idx(C.done), late = C.late ? idx(C.late) : -1;
+  const slotOfItem = (i) => fx.items[i].summary.replace(/^\S+\s+\S+\s+\d{1,2}:\d{2}\s+/, "");
+  const fitsDay = (g, tag) => !tag || !(g.tage ?? []).length || g.tage.includes(tag);
+  const expectedNames = (i) => {
+    const slot = slotOfItem(i);
+    const tag = (fx.punkte ?? {})[fx.items[i].summary]?.tag;
+    const list = gerichte.filter((g) => g.slots.includes(slot));
+    return [...list.filter((g) => fitsDay(g, tag)), ...list.filter((g) => !fitsDay(g, tag))].map((g) => g.name);
+  };
+  const ca = (g) => (g.geschaetzt ? "ca. " : "");
+  const info = (g) => [g.kcal != null && `${ca(g)}${g.kcal} kcal`, g.eiweiss_g != null && `${ca(g)}${g.eiweiss_g} g Eiweiß`, g.zeit_min != null && `${g.zeit_min} min`, [].concat(g.ort ?? []).join(", ")].filter(Boolean).join(" · ");
+  const planLine = (g) => [g.eiweiss_g != null && `${ca(g)}${g.eiweiss_g} g Eiweiß`, g.kcal != null && `${ca(g)}${g.kcal} kcal`, g.zeit_min != null && `${g.zeit_min} min`].filter(Boolean).join(" · ");
+  const pick = gerichte.find((g) => g.id === C.replan_pick);
+  const notePick = gerichte.find((g) => g.id === C.note_pick);
+  const last = (page) => page.evaluate(() => window.__calls.at(-1));
+  const dshot = async (page, name) => page.locator("#host").screenshot({ path: `${outDir}/${dprefix}-${name}.png` });
+  for (const theme of ["hell", "dunkel"]) {
+    const { ctx, page, errors } = await setup(theme, { fx, extraStates });
+    const rows = card(page).locator("li.item");
+    check(`${theme} dish: replan button on open items with dishes`, (await rows.nth(lunch).locator(".replan-btn").count()) === 1);
+    check(`${theme} dish: none on done items`, (await rows.nth(done).locator(".replan-btn").count()) === 0);
+    if (late >= 0) check(`${theme} dish: none when no dish fits the slot`, (await rows.nth(late).locator(".replan-btn").count()) === 0);
+    await dshot(page, `${theme}-1-uebersicht`);
+
+    await rows.nth(lunch).locator(".replan-btn").click();
+    await page.waitForTimeout(100);
+    const names = (await rows.nth(lunch).locator(".dish .dish-name").allInnerTexts()).map((n) => n.replace(/\s*·.*$/s, "").trim());
+    const want = expectedNames(lunch);
+    check(`${theme} dish: picker lists the slot's dishes, day type first`, JSON.stringify(names) === JSON.stringify(want), names.join(", "));
+    const first = gerichte.find((g) => g.name === want[0]);
+    const shownInfo = await rows.nth(lunch).locator(".dish .dish-info").first().innerText();
+    check(`${theme} dish: short info`, shownInfo === info(first), `${shownInfo} | ${info(first)}`);
+    const planned = (fx.punkte ?? {})[fx.items[lunch].summary]?.gericht_id;
+    if (planned) check(`${theme} dish: planned dish marked`, (await rows.nth(lunch).locator(".dish", { hasText: "laut Plan" }).locator(".dish-name").innerText()).startsWith(gerichte.find((g) => g.id === planned).name));
+    await dshot(page, `${theme}-2-umplanen-auswahl`);
+
+    await rows.nth(lunch).locator(".dish").nth(want.indexOf(pick.name)).click();
+    await page.waitForTimeout(250);
+    let call = await last(page);
+    const d = call?.data?.description ?? "";
+    const lines = d.split("\n");
+    check(`${theme} dish: marker line with id`, lines[0] === `🔁 Gewählt: ${pick.name} [${pick.id}]`, JSON.stringify(d));
+    check(`${theme} dish: plan text replaced`, lines[1] === (pick.kurz ? `${pick.name}: ${pick.kurz}` : pick.name) && lines[2] === planLine(pick), JSON.stringify(lines.slice(1, 3)));
+    check(`${theme} dish: original kept in one line`, lines[3] === "↩ Plan: " + fx.items[lunch].description.split("\n").join(" ¶ "));
+    check(`${theme} dish: status unchanged, summary untouched`, call?.data?.status === undefined && !("rename" in (call?.data ?? {})));
+    check(`${theme} dish: row shows choice`, (await rows.nth(lunch).locator(".choice").innerText()).includes(`Gewählt: ${pick.name}`));
+    check(`${theme} dish: picker closed`, (await rows.nth(lunch).locator(".picker").count()) === 0);
+    await rows.nth(lunch).locator("button.main").click();
+    await page.waitForTimeout(100);
+    check(`${theme} dish: tap shows original plan`, (await rows.nth(lunch).locator(".original").innerText()).startsWith("Ursprünglich geplant: " + fx.items[lunch].description.split("\n")[0].slice(0, 20)));
+    await dshot(page, `${theme}-3-umgeplant`);
+
+    await rows.nth(lunch).locator(".replan-btn").click();
+    await page.waitForTimeout(100);
+    check(`${theme} dish: current dish marked`, (await rows.nth(lunch).locator(".dish.current").count()) === 1);
+    await rows.nth(lunch).locator(".picker .btn.danger").click();
+    await page.waitForTimeout(250);
+    call = await last(page);
+    check(`${theme} dish: back to plan restores the description`, call?.data?.description === fx.items[lunch].description, JSON.stringify(call?.data?.description));
+    if (planned) {
+      const n = (await page.evaluate(() => window.__calls.length));
+      await rows.nth(lunch).locator(".replan-btn").click();
+      await page.waitForTimeout(100);
+      await rows.nth(lunch).locator(".dish", { hasText: "laut Plan" }).click();
+      await page.waitForTimeout(150);
+      check(`${theme} dish: picking the planned dish writes nothing`, (await page.evaluate(() => window.__calls.length)) === n && (await rows.nth(lunch).locator(".picker").count()) === 0);
+    }
+
+    // Note editor with the dish list
+    await rows.nth(post).locator("label.ann input").click();
+    await page.waitForTimeout(100);
+    const sel = rows.nth(post).locator(".dish-select");
+    check(`${theme} dish: select in note editor`, (await sel.count()) === 1);
+    const groups = await sel.locator("optgroup").evaluateAll((g) => g.map((x) => x.label));
+    check(`${theme} dish: fitting dishes first`, groups[0] === `Passt zu ${slotOfItem(post)}` && groups[1] === "Andere Gerichte", groups.join(" | "));
+    await rows.nth(post).locator(".editor textarea.field").fill(C.typed);
+    await sel.selectOption(notePick.id);
+    await page.waitForTimeout(100);
+    const val = await rows.nth(post).locator(".editor textarea.field").inputValue();
+    check(`${theme} dish: pick sets the reference line, free text stays`, val === `[${notePick.id}] ${notePick.name}\n${C.typed}`, JSON.stringify(val));
+    await dshot(page, `${theme}-4-abweichung-liste`);
+    await rows.nth(post).locator(".btn.primary").click();
+    await page.waitForTimeout(250);
+    call = await last(page);
+    check(`${theme} dish: stored note carries id`, call?.data?.description?.endsWith(`\n❗ Abweichung: [${notePick.id}] ${notePick.name} / ${C.typed}`) && call?.data?.status === "completed", JSON.stringify(call?.data));
+    check(`${theme} dish: shown without id`, (await rows.nth(post).locator(".annotation").innerText()) === `${notePick.name}\n${C.typed}`);
+    await dshot(page, `${theme}-5-abweichung-gespeichert`);
+    check(`${theme} dish: no errors`, errors.length === 0, errors.join(" | "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await setup("hell", { fx });
+    check("dish: missing entity shows a hint", (await card(page).locator(".message.muted", { hasText: "Gerichteliste nicht verfügbar" }).count()) === 1);
+    check("dish: no replan buttons without catalog", (await card(page).locator(".replan-btn").count()) === 0);
+    await card(page).locator("li.item").nth(post).locator("label.ann input").click();
+    await page.waitForTimeout(100);
+    check("dish: no select without catalog", (await card(page).locator(".dish-select").count()) === 0);
+    check("dish: no errors without catalog", errors.length === 0, errors.join(" | "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await setup("hell", { fx, extraStates, config: { replan: false, dish_in_note: false } });
+    check("dish: options can turn both off", (await card(page).locator(".replan-btn").count()) === 0);
+    await ctx.close();
+  }
 }
 
 await browser.close();

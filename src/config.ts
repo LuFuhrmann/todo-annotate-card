@@ -1,10 +1,11 @@
 import { DEFAULT_SEPARATOR, DEFAULT_TEMPLATE, normalizeTemplate } from "./annotation";
 import type { TodoAnnotateCardConfig } from "./types";
 
-export type ResolvedConfig = Required<Omit<TodoAnnotateCardConfig, "title" | "annotation_label" | "skip_label">> & {
+export type ResolvedConfig = Required<Omit<TodoAnnotateCardConfig, "title" | "annotation_label" | "skip_label" | "replan_label">> & {
   title?: string;
   annotation_label?: string;
   skip_label?: string;
+  replan_label?: string;
 };
 
 export const DEFAULTS = {
@@ -25,6 +26,10 @@ export const DEFAULTS = {
   show_header: true,
   skip: false,
   skip_format: "",
+  dishes_entity: "",
+  dish_slot_pattern: "",
+  replan: true,
+  dish_in_note: true,
 } as const;
 
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], d: T): T =>
@@ -54,5 +59,10 @@ export function resolveConfig(c: TodoAnnotateCardConfig): ResolvedConfig {
     skip: c.skip ?? DEFAULTS.skip,
     skip_label: c.skip_label,
     skip_format: typeof c.skip_format === "string" ? c.skip_format : DEFAULTS.skip_format,
+    dishes_entity: typeof c.dishes_entity === "string" ? c.dishes_entity.trim() : DEFAULTS.dishes_entity,
+    dish_slot_pattern: typeof c.dish_slot_pattern === "string" ? c.dish_slot_pattern : DEFAULTS.dish_slot_pattern,
+    replan: c.replan ?? DEFAULTS.replan,
+    replan_label: c.replan_label,
+    dish_in_note: c.dish_in_note ?? DEFAULTS.dish_in_note,
   };
 }

@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing, type TemplateResult } from "lit";
 import { defaultSkipFormat } from "./annotation";
 import { DEFAULTS } from "./config";
+import { DEFAULT_SLOT_PATTERN } from "./dishes";
 import { localizer, type Localizer } from "./localize";
 import type { HomeAssistant, TodoAnnotateCardConfig } from "./types";
 
@@ -80,6 +81,15 @@ export class TodoAnnotateCardEditor extends LitElement {
         { key: "skip", kind: "bool", label: "e_skip" },
         { key: "skip_label", kind: "text", label: "e_skip_label" },
         { key: "skip_format", kind: "text", label: "e_skip_format" },
+      ],
+    },
+    {
+      fields: [
+        { key: "dishes_entity", kind: "text", label: "e_dishes_entity", placeholder: "sensor.ernaehrung_gerichte" },
+        { key: "dish_slot_pattern", kind: "text", label: "e_dish_slot_pattern", placeholder: DEFAULT_SLOT_PATTERN },
+        { key: "replan", kind: "bool", label: "e_replan" },
+        { key: "replan_label", kind: "text", label: "e_replan_label" },
+        { key: "dish_in_note", kind: "bool", label: "e_dish_in_note" },
       ],
     },
   ];

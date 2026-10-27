@@ -1,0 +1,218 @@
+{
+ "stand": "2026-10-27",
+ "slots": [
+  "Frühstück",
+  "Mittag",
+  "Snack im Auto",
+  "Vor dem Training",
+  "Nach dem Training",
+  "Abendessen",
+  "Snack",
+  "Spätsnack"
+ ],
+ "gerichte": [
+  {
+   "id": "muesli_banane",
+   "name": "Müsli mit Banane",
+   "slots": [
+    "Frühstück"
+   ],
+   "kcal": 560,
+   "eiweiss_g": 17,
+   "geschaetzt": false,
+   "zeit_min": 3,
+   "ort": [
+    "zu Hause",
+    "Büro"
+   ],
+   "tage": [
+    "training",
+    "ruhe"
+   ],
+   "kurz": "80 g Früchtemüsli, 250 ml Milch, 1 Banane",
+   "zubereitung": "Alles in eine Schüssel geben.",
+   "zutaten": [
+    "80 g Früchtemüsli",
+    "250 ml Milch",
+    "1 Banane"
+   ]
+  },
+  {
+   "id": "erdnuss_toast",
+   "name": "Erdnussbutter-Toast",
+   "slots": [
+    "Frühstück",
+    "Vor dem Training"
+   ],
+   "kcal": 565,
+   "eiweiss_g": 21,
+   "geschaetzt": false,
+   "zeit_min": 5,
+   "ort": [
+    "zu Hause"
+   ],
+   "tage": [
+    "training",
+    "ruhe"
+   ],
+   "kurz": "2 Toast, 30 g Erdnussbutter, 1 Banane, 200 ml Milch",
+   "zubereitung": "Toasten, bestreichen.",
+   "zutaten": [
+    "2 Scheiben Toast",
+    "30 g Erdnussbutter",
+    "1 Banane",
+    "200 ml Milch"
+   ]
+  },
+  {
+   "id": "doener_box",
+   "name": "Döner-Box",
+   "slots": [
+    "Mittag",
+    "Nach dem Training"
+   ],
+   "kcal": 810,
+   "eiweiss_g": 47,
+   "geschaetzt": false,
+   "zeit_min": 5,
+   "ort": [
+    "Büro"
+   ],
+   "tage": [
+    "training",
+    "ruhe"
+   ],
+   "kurz": "Hähnchen-Gyros, Mikrowellenreis, Gurke, Tomate, Knoblauchsauce",
+   "zubereitung": "Gyros und Reis 2 Minuten erwärmen.",
+   "zutaten": [
+    "200 g Hähnchen-Gyros",
+    "1 Beutel Reis",
+    "Gurke",
+    "Tomate",
+    "2 EL Knoblauchsauce"
+   ]
+  },
+  {
+   "id": "gyros_wraps",
+   "name": "Gyros-Wraps",
+   "slots": [
+    "Mittag"
+   ],
+   "kcal": 805,
+   "eiweiss_g": 48,
+   "geschaetzt": false,
+   "zeit_min": 5,
+   "ort": [
+    "Büro",
+    "unterwegs"
+   ],
+   "tage": [
+    "ruhe"
+   ],
+   "kurz": "2 Wraps, Hähnchen-Gyros, Eisbergsalat, Knoblauchsauce",
+   "zubereitung": "Wraps füllen, kalt oder kurz warm.",
+   "zutaten": [
+    "2 Wraps",
+    "200 g Hähnchen-Gyros",
+    "Eisbergsalat",
+    "2 EL Knoblauchsauce"
+   ]
+  },
+  {
+   "id": "imbiss_doener",
+   "name": "Döner vom Imbiss",
+   "slots": [
+    "Mittag",
+    "Nach dem Training",
+    "Abendessen"
+   ],
+   "kcal": 750,
+   "eiweiss_g": 40,
+   "geschaetzt": true,
+   "zeit_min": 10,
+   "ort": [
+    "unterwegs"
+   ],
+   "tage": [
+    "training"
+   ],
+   "kurz": "Hähnchendöner mit Salat, ohne Scharf",
+   "zubereitung": "",
+   "zutaten": []
+  },
+  {
+   "id": "backshop_broetchen",
+   "name": "Belegtes Brötchen (Backshop)",
+   "slots": [
+    "Mittag",
+    "Snack im Auto",
+    "Vor dem Training"
+   ],
+   "kcal": 420,
+   "eiweiss_g": 18,
+   "geschaetzt": true,
+   "zeit_min": 2,
+   "ort": [
+    "unterwegs"
+   ],
+   "tage": [
+    "training",
+    "ruhe"
+   ],
+   "kurz": "Käse-Schinken-Brötchen",
+   "zubereitung": "",
+   "zutaten": []
+  },
+  {
+   "id": "studentenfutter_apfel",
+   "name": "Studentenfutter und Apfel",
+   "slots": [
+    "Snack im Auto",
+    "Snack"
+   ],
+   "kcal": 280,
+   "eiweiss_g": 6,
+   "geschaetzt": false,
+   "zeit_min": 0,
+   "ort": [
+    "unterwegs"
+   ],
+   "tage": [
+    "training",
+    "ruhe"
+   ],
+   "kurz": "40 g Studentenfutter, 1 Apfel",
+   "zubereitung": "",
+   "zutaten": [
+    "40 g Studentenfutter",
+    "1 Apfel"
+   ]
+  },
+  {
+   "id": "burger_abend",
+   "name": "Burger-Abend",
+   "slots": [
+    "Nach dem Training",
+    "Abendessen"
+   ],
+   "kcal": 1060,
+   "eiweiss_g": 54,
+   "geschaetzt": false,
+   "zeit_min": 20,
+   "ort": [
+    "zu Hause"
+   ],
+   "tage": [
+    "training"
+   ],
+   "kurz": "2 Burger mit Rind-Patty, Käse, Salat",
+   "zubereitung": "Patties braten, Brötchen toasten, belegen.",
+   "zutaten": [
+    "2 TK-Rindfleisch-Patties",
+    "2 Burger-Brötchen",
+    "2 Scheiben Käse",
+    "Salat"
+   ]
+  }
+ ]
+}

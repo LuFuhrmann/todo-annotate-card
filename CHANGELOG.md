@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] – 2026-10-27
+
+### Added
+- Optional dish catalog from an entity's attributes (`dishes_entity`, attribute `dishes` or `gerichte`; optional `punkte` with planned dish and day type per item). Off unless configured; existing cards are unchanged.
+- ⇄ **Change dish** for open items (`replan`, `replan_label`): pick a dish that fits the item's slot (`dish_slot_pattern`, default: text after the time in the summary). The description gets `🔁 Chosen/Gewählt: Name [id]`, the dish text with kcal, protein and time, and `↩ Planned/Plan:` with the original description; **Back to the plan** restores it. Dishes for the item's day type are listed first; the planned one is marked.
+- Dish list in the note editor (`dish_in_note`); the note is stored as `[id] Name / text` and shown without the id. Free text still works.
+- Visual editor fields and German/English texts for the new options.
+
 ## [1.1.0] – 2026-10-26
 
 ### Fixed

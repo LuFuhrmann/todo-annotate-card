@@ -38,6 +38,19 @@ export interface TodoAnnotateCardConfig {
    * (default “⊘ Ausgelassen” or “⊘ Skipped”). With `{text}` the card asks for a reason.
    */
   skip_format?: string;
+  /**
+   * Entity whose attributes hold a dish catalog (`gerichte` or `dishes`: list of
+   * {id, name, slots, kcal, eiweiss_g, geschaetzt, zeit_min, ort, kurz}). Off when unset.
+   */
+  dishes_entity?: string;
+  /** Regular expression with one group that takes the slot from the item summary. */
+  dish_slot_pattern?: string;
+  /** Offer “Change dish” on open items (default true when `dishes_entity` is set). */
+  replan?: boolean;
+  /** Label of the change-dish button. Defaults to “Change dish” / “Umplanen”. */
+  replan_label?: string;
+  /** Offer the dish list in the note editor (default true when `dishes_entity` is set). */
+  dish_in_note?: boolean;
 }
 
 // Minimal subset of the Home Assistant frontend `hass` object used by the card.

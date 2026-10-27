@@ -1,0 +1,83 @@
+{
+ "entity": "todo.essensplan_woche",
+ "friendly_name": "Essensplan Woche",
+ "language": "de",
+ "dishes_entity": "sensor.ernaehrung_gerichte",
+ "catalog": "gerichte-beispiel.json",
+ "config": {
+  "title": "Mahlzeiten",
+  "annotation_label": "Abweichung",
+  "group_by": "due_day",
+  "show_due": false,
+  "skip": true,
+  "skip_label": "Ausgelassen",
+  "skip_format": "⊘ Ausgelassen",
+  "dishes_entity": "sensor.ernaehrung_gerichte"
+ },
+ "items": [
+  {
+   "uid": "m1",
+   "summary": "Mo 26.10. 06:00 Frühstück",
+   "status": "completed",
+   "description": "Müsli-Frühstück: 80 g Früchtemüsli, 250 ml Milch, 1 Banane\n17 g Eiweiß · 560 kcal",
+   "due": "2026-10-26T06:00:00+01:00"
+  },
+  {
+   "uid": "m2",
+   "summary": "Mo 26.10. 10:30 Mittag",
+   "status": "needs_action",
+   "description": "Gyros-Wraps: 2 Wraps mit Hähnchen-Gyros, Eisbergsalat. Ersatz: Brötchen vom Backshop / Tankstelle\n48 g Eiweiß · 805 kcal",
+   "due": "2026-10-26T10:30:00+01:00"
+  },
+  {
+   "uid": "m3",
+   "summary": "Mo 26.10. 13:00 Snack im Auto",
+   "status": "needs_action",
+   "description": "40 g Studentenfutter und 1 Apfel\n6 g Eiweiß · 280 kcal",
+   "due": "2026-10-26T13:00:00+01:00"
+  },
+  {
+   "uid": "m4",
+   "summary": "Mo 26.10. 20:15 Nach dem Training",
+   "status": "needs_action",
+   "description": "Burger-Abend: 2 Burger mit Rind-Patty, Käse, Salat\n54 g Eiweiß · 1060 kcal",
+   "due": "2026-10-26T20:15:00+01:00"
+  },
+  {
+   "uid": "m5",
+   "summary": "Mo 26.10. 22:00 Spätsnack",
+   "status": "needs_action",
+   "description": "1 Glas Milch\n7 g Eiweiß · 130 kcal",
+   "due": "2026-10-26T22:00:00+01:00"
+  }
+ ],
+ "punkte": {
+  "Mo 26.10. 06:00 Frühstück": {
+   "gericht_id": "muesli_banane",
+   "tag": "training"
+  },
+  "Mo 26.10. 10:30 Mittag": {
+   "gericht_id": "gyros_wraps",
+   "tag": "training"
+  },
+  "Mo 26.10. 13:00 Snack im Auto": {
+   "gericht_id": "studentenfutter_apfel",
+   "tag": "training"
+  },
+  "Mo 26.10. 20:15 Nach dem Training": {
+   "tag": "training"
+  },
+  "Mo 26.10. 22:00 Spätsnack": {
+   "tag": "training"
+  }
+ },
+ "dish_checks": {
+  "lunch": "m2",
+  "post": "m4",
+  "done": "m1",
+  "late": "m5",
+  "replan_pick": "doener_box",
+  "note_pick": "imbiss_doener",
+  "typed": "ohne Pommes"
+ }
+}

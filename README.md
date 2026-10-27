@@ -5,13 +5,17 @@ Tick it to attach a short note, e.g. a *deviation* from a meal plan, a *problem*
 The note is merged into the item, the item is marked with ❗ (configurable) and shows only the note.
 Tap the item to see the original description again.
 
-[![hacs][hacs-badge]][hacs-url] ![version](https://img.shields.io/badge/version-1.1.0-blue) ![license](https://img.shields.io/badge/license-MIT-green)
+[![hacs][hacs-badge]][hacs-url] ![version](https://img.shields.io/badge/version-1.2.0-blue) ![license](https://img.shields.io/badge/license-MIT-green)
 
 *Deutsch: siehe [unten](#deutsch).*
 
 | Light | Dark | Note editor |
 |---|---|---|
 | ![Light](screenshots/demo-hell-1-uebersicht.png) | ![Dark, expanded](screenshots/demo-dunkel-2-aufgeklappt.png) | ![Editor](screenshots/demo-hell-3-eingabe.png) |
+
+| Pick another dish | Replanned | Note from the dish list |
+|---|---|---|
+| ![Dish picker](screenshots/gerichte-hell-2-umplanen-auswahl.png) | ![Replanned, dark](screenshots/gerichte-dunkel-3-umgeplant.png) | ![Note with dish](screenshots/gerichte-hell-4-abweichung-liste.png) |
 
 ## Features
 - Two checkboxes per item: **Done** (the normal to-do status) and a configurable second one (label, icon, marker). Optional third checkbox **Skipped** (`skip: true`), off unless you turn it on.
@@ -20,6 +24,7 @@ Tap the item to see the original description again.
 - Annotated items show marker + note only; the original description expands on tap. Notes can be edited or removed (removing returns the item to normal).
 - Works with any `todo.*` entity whose integration can edit descriptions (e.g. **Local To-do**). Lists without description support show a clear message.
 - Live updates (`todo/item/subscribe`), writes via the `todo.update_item` action.
+- Optional dish catalog (`dishes_entity`): swap a meal for another dish that fits the slot (⇄ button), or pick the dish you actually ate as the note. The original plan is kept and can be restored.
 - Sorting, grouping by due day, hide or separate completed items, compact mode.
 - Visual editor, English and German (follows your Home Assistant language), theme colours and dark mode, 44 px touch targets for the mobile app, keyboard and screen reader support.
 - No external runtime dependencies, no CDN, one small JS file. All text is rendered as text (no HTML injection).
@@ -36,7 +41,7 @@ HACS adds the dashboard resource automatically.
 ### Manual
 1. Download `todo-annotate-card.js` from the [latest release](https://github.com/LuFuhrmann/todo-annotate-card/releases) (or `dist/`).
 2. Copy it to `/config/www/todo-annotate-card.js`.
-3. Settings → Dashboards → ⋮ → **Resources** → add `/local/todo-annotate-card.js?v=1.1.0`, type **JavaScript module**. Increase `?v=` after every update.
+3. Settings → Dashboards → ⋮ → **Resources** → add `/local/todo-annotate-card.js?v=1.2.0`, type **JavaScript module**. Increase `?v=` after every update.
 
 ## Configuration
 Add the card from the card picker (**Todo Annotate Card**) or use YAML:
@@ -69,6 +74,11 @@ entity: todo.meal_plan
 | `skip` | bool | `false` | Third checkbox. Off leaves existing cards unchanged. |
 | `skip_label` | string | `Skipped` / `Ausgelassen` | Label of the third checkbox (legend, ARIA, hint). |
 | `skip_format` | string | `⊘ Skipped` or `⊘ Ausgelassen` | Line stored in the description. Depends on the Home Assistant language when unset. If it contains `{text}` once, the card asks for a reason. |
+| `dishes_entity` | string | `""` (off) | Entity whose attributes hold a dish catalog (see [Dish catalog](#dish-catalog)). Empty turns all dish features off. |
+| `dish_slot_pattern` | string | `^\S+\s+\S+\s+\d{1,2}:\d{2}\s+(.+)$` | Regular expression applied to the item summary; group 1 is the slot (e.g. `Mi 28.10. 10:30 Mittag` → `Mittag`). Invalid patterns fall back to the default. |
+| `replan` | bool | `true` | Show the ⇄ button to swap an open item for another dish of the same slot. |
+| `replan_label` | string | `Change dish` / `Umplanen` | Label of the ⇄ button (tooltip, ARIA). |
+| `dish_in_note` | bool | `true` | Show a dish list above the note field. Free text stays possible. |
 
 ### Examples
 Meal plan with deviations, grouped by day (German UI):
@@ -149,6 +159,44 @@ re.match(r"^\s*⊘\s*Ausgelassen\s*:\s*(.*)\s*$", line)  # reason captured in gr
 
 On the card a skipped item shows `⊘` plus the name in grey, a “Skipped” hint (and the reason, if any). Tap it to see the original description, same as a note.
 
+## Dish catalog
+With `dishes_entity` set, the card reads a catalog from that entity's attributes. Any integration can provide it; a script can simply `POST /api/states/sensor.meal_dishes`. Attribute `dishes` (or `gerichte`) is a list:
+
+```json
+{
+  "dishes": [
+    {"id": "doener_box", "name": "Döner box with rice", "slots": ["Lunch", "Dinner"],
+     "kcal": 810, "eiweiss_g": 47, "geschaetzt": true, "zeit_min": 5,
+     "ort": ["at home", "office"], "tage": ["training"], "kurz": "Chicken gyros, rice, cucumber, tomato."}
+  ],
+  "punkte": {"Mi 28.10. 10:30 Lunch": {"gericht_id": "reis_box", "tag": "training"}}
+}
+```
+
+- Required: `id` (`[A-Za-z0-9_.-]`, max. 64) and `name`. `slots` decides where a dish is offered; `kcal`, `eiweiss_g` (protein), `zeit_min`, `ort` (place, string or list) and `kurz` (short text) are shown when present; `geschaetzt: true` prefixes the values with “ca.”.
+- Optional `punkte` maps an item summary to its planned dish (`gericht_id`) and day type (`tag`). Dishes whose `tage` contain the item's day type are listed first; the others are labelled “rather for: …”. Without `gericht_id` the planned dish is the catalog entry whose `name` equals the description text before the first `": "`.
+- Home Assistant's recorder stores attributes only up to 16 KB. Larger catalogs still work on the card; exclude the entity from the recorder to avoid the warning.
+
+### How a swapped dish is stored
+Only the description changes; the summary stays the key.
+
+```
+🔁 Gewählt: Döner-Box mit Reis [doener_box]
+Döner-Box mit Reis: Hähnchen-Gyros, Mikrowellenreis, Gurke, Tomate.
+ca. 47 g Eiweiß · ca. 810 kcal · 5 min
+↩ Plan: Reis-Box mit Schinken: Reis, Kochschinken, Erbsen ¶ 44 g Eiweiß · 735 kcal
+```
+
+- Line 1 marks the choice (`🔁 Chosen: … [id]` in English), line 2–3 are the new plan text, `↩ Plan:` (`↩ Planned:`) keeps the original description from the first swap, line breaks as ` ¶ `. **Back to the plan** restores it. Picking the planned dish on an unchanged item writes nothing.
+- Note and skip lines (`❗ …`, `⊘ …`) stay below and work as before; a note on a swapped item is compared with the new plan.
+- A dish picked as note is stored as `[id] Name` in front of the text, e.g. `❗ Abweichung: [imbiss_doener] Döner vom Imbiss / ohne Pommes`. The card hides the `[id]`.
+
+```python
+CHOICE = re.compile(r"^\s*🔁\s*(?:Gewählt|Chosen)\s*:\s*(.*?)\s*\[([A-Za-z0-9_.-]{1,64})\]\s*$")  # name, id
+PLANNED = re.compile(r"^\s*↩\s*(?:Plan|Planned)\s*:\s*(.*)$")       # original, " ¶ " = line break
+DISH_REF = re.compile(r"^\s*\[([A-Za-z0-9_.-]{1,64})\]\s*")          # at the start of a note
+```
+
 ## Compatibility
 - Home Assistant 2024.1 or newer (to-do item descriptions and `todo/item/subscribe`).
 - Integrations: anything that supports *update item* and *set description* (e.g. Local To-do, CalDAV). Lists without description support (e.g. the classic Shopping list) show a message and the second checkbox is disabled.
@@ -180,9 +228,10 @@ Die ursprüngliche Beschreibung erscheint erst, wenn du den Punkt antippst. Die 
 - Mehrzeilige Eingaben werden mit ` / ` zu einer Zeile verbunden.
 - Tippt man die Anmerkung an, speichert sie auch, wenn die Checkbox erneut angetippt, der Punkt als erledigt markiert oder ein anderer Punkt geöffnet wird. Nur **Abbrechen** verwirft den Schreibvorgang; der Text bleibt als Entwurf erhalten und erscheint beim nächsten Öffnen wieder. Solange der Editor offen ist, ist die Checkbox unbestimmt und zeigt „Noch nicht gespeichert“.
 - Optionale dritte Checkbox **Ausgelassen** (`skip: true`, standardmäßig aus). Speicherzeile ohne `skip_format` bei deutscher Oberfläche: `⊘ Ausgelassen`. Mit Grund z. B. `skip_format: "⊘ Ausgelassen: {text}"` → Zeile `⊘ Ausgelassen: keine Zeit`. Anmerkung und Ausgelassen schließen sich aus. Abhaken setzt den Punkt auf erledigt; das Häkchen bei Erledigt zu entfernen löscht die Ausgelassen-Zeile; nur Ausgelassen abwählen lässt den Punkt erledigt.
+- Optionaler Gerichte-Katalog (`dishes_entity`, Attribut `gerichte` oder `dishes`, Format siehe [Dish catalog](#dish-catalog)): Über ⇄ **Umplanen** wählst du für einen offenen Punkt ein anderes Gericht aus dem passenden Slot (Slot = Teil der Bezeichnung nach der Uhrzeit, anpassbar über `dish_slot_pattern`). Gespeichert wird `🔁 Gewählt: Name [id]`, der neue Plantext und `↩ Plan: <ursprünglicher Plan>`; **Zurück zum Plan** stellt ihn wieder her. Im Abweichungs-Editor gibt es eine Gerichteliste (`dish_in_note`), Freitext bleibt möglich; gespeichert als `❗ Abweichung: [id] Name / Text`. Gerichte, die zum Tagtyp passen (`tage` im Katalog, `tag` in `punkte`), stehen oben.
 - Oberfläche auf Deutsch oder Englisch, je nach HA-Sprache; visueller Karten-Editor; hell/dunkel; gut bedienbar in der HA-App am Handy.
 
-Installation: HACS → ⋮ → *Benutzerdefinierte Repositories* → Repository-URL, Kategorie **Dashboard** → herunterladen. Manuell: Datei nach `/config/www/` kopieren und unter *Einstellungen → Dashboards → Ressourcen* als `/local/todo-annotate-card.js?v=1.1.0` (JavaScript-Modul) eintragen.
+Installation: HACS → ⋮ → *Benutzerdefinierte Repositories* → Repository-URL, Kategorie **Dashboard** → herunterladen. Manuell: Datei nach `/config/www/` kopieren und unter *Einstellungen → Dashboards → Ressourcen* als `/local/todo-annotate-card.js?v=1.2.0` (JavaScript-Modul) eintragen.
 
 [hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
 [hacs-url]: https://hacs.xyz/docs/faq/custom_repositories
