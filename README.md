@@ -5,7 +5,7 @@ Tick it to attach a short note, e.g. a *deviation* from a meal plan, a *problem*
 The note is merged into the item, the item is marked with ❗ (configurable) and shows only the note.
 Tap the item to see the original description again.
 
-[![hacs][hacs-badge]][hacs-url] ![version](https://img.shields.io/badge/version-1.2.0-blue) ![license](https://img.shields.io/badge/license-MIT-green)
+[![hacs][hacs-badge]][hacs-url] ![version](https://img.shields.io/badge/version-1.2.1-blue) ![license](https://img.shields.io/badge/license-MIT-green)
 
 *Deutsch: siehe [unten](#deutsch).*
 
@@ -41,7 +41,7 @@ HACS adds the dashboard resource automatically.
 ### Manual
 1. Download `todo-annotate-card.js` from the [latest release](https://github.com/LuFuhrmann/todo-annotate-card/releases) (or `dist/`).
 2. Copy it to `/config/www/todo-annotate-card.js`.
-3. Settings → Dashboards → ⋮ → **Resources** → add `/local/todo-annotate-card.js?v=1.2.0`, type **JavaScript module**. Increase `?v=` after every update.
+3. Settings → Dashboards → ⋮ → **Resources** → add `/local/todo-annotate-card.js?v=1.2.1`, type **JavaScript module**. Increase `?v=` after every update.
 
 ## Configuration
 Add the card from the card picker (**Todo Annotate Card**) or use YAML:
@@ -231,7 +231,7 @@ Die ursprüngliche Beschreibung erscheint erst, wenn du den Punkt antippst. Die 
 - Optionaler Gerichte-Katalog (`dishes_entity`, Attribut `gerichte` oder `dishes`, Format siehe [Dish catalog](#dish-catalog)): Über ⇄ **Umplanen** wählst du für einen offenen Punkt ein anderes Gericht aus dem passenden Slot (Slot = Teil der Bezeichnung nach der Uhrzeit, anpassbar über `dish_slot_pattern`). Gespeichert wird `🔁 Gewählt: Name [id]`, der neue Plantext und `↩ Plan: <ursprünglicher Plan>`; **Zurück zum Plan** stellt ihn wieder her. Im Abweichungs-Editor gibt es eine Gerichteliste (`dish_in_note`), Freitext bleibt möglich; gespeichert als `❗ Abweichung: [id] Name / Text`. Gerichte, die zum Tagtyp passen (`tage` im Katalog, `tag` in `punkte`), stehen oben.
 - Oberfläche auf Deutsch oder Englisch, je nach HA-Sprache; visueller Karten-Editor; hell/dunkel; gut bedienbar in der HA-App am Handy.
 
-Installation: HACS → ⋮ → *Benutzerdefinierte Repositories* → Repository-URL, Kategorie **Dashboard** → herunterladen. Manuell: Datei nach `/config/www/` kopieren und unter *Einstellungen → Dashboards → Ressourcen* als `/local/todo-annotate-card.js?v=1.2.0` (JavaScript-Modul) eintragen.
+Installation: HACS → ⋮ → *Benutzerdefinierte Repositories* → Repository-URL, Kategorie **Dashboard** → herunterladen. Manuell: Datei nach `/config/www/` kopieren und unter *Einstellungen → Dashboards → Ressourcen* als `/local/todo-annotate-card.js?v=1.2.1` (JavaScript-Modul) eintragen.
 
 [hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
 [hacs-url]: https://hacs.xyz/docs/faq/custom_repositories

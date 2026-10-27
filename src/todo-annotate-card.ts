@@ -9,7 +9,7 @@ import { localizer, type Localizer } from "./localize";
 import { TodoFeature, type HomeAssistant, type TodoAnnotateCardConfig, type TodoItem } from "./types";
 import "./todo-annotate-card-editor";
 
-export const CARD_VERSION = "1.2.0";
+export const CARD_VERSION = "1.2.1";
 const TAG = "todo-annotate-card";
 
 export class TodoAnnotateCard extends LitElement {
@@ -1024,12 +1024,15 @@ export class TodoAnnotateCard extends LitElement {
     }
     .picker {
       padding: 2px 0 12px;
+      color: var(--primary-text-color);
     }
     .picker-title {
       margin: 0 0 6px;
       font-size: 0.85rem;
       font-weight: 500;
-      color: var(--secondary-text-color);
+      /* Raw --secondary-text-color is only ~4.4:1 on the old input fill. Mix toward the surface text so small type stays AA. */
+      color: color-mix(in srgb, var(--secondary-text-color) 85%, var(--primary-text-color));
+      -webkit-text-fill-color: currentColor;
     }
     .filter {
       margin-bottom: 6px;
@@ -1049,7 +1052,9 @@ export class TodoAnnotateCard extends LitElement {
       text-align: left;
       font: inherit;
       color: var(--primary-text-color);
-      background: var(--input-fill-color, var(--secondary-background-color, rgba(127, 127, 127, 0.08)));
+      -webkit-text-fill-color: currentColor;
+      /* Text tokens are for the card surface. --input-fill-color is a separate fill and made this text too light. */
+      background: var(--card-background-color, var(--mdc-theme-surface, var(--ha-card-background)));
       border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.3));
       border-radius: 10px;
       cursor: pointer;
@@ -1064,28 +1069,44 @@ export class TodoAnnotateCard extends LitElement {
     }
     .dish-name {
       font-weight: 500;
+      color: var(--primary-text-color);
+      -webkit-text-fill-color: currentColor;
     }
     .dish-cur {
-      color: var(--primary-color);
+      /* --primary-color is a brand fill (default light cyan) and fails as text on a light surface. */
+      color: color-mix(in srgb, var(--primary-color) 50%, var(--primary-text-color));
+      -webkit-text-fill-color: currentColor;
       font-weight: 400;
     }
     .dish-info {
       font-size: 0.8rem;
-      color: var(--secondary-text-color);
+      color: color-mix(in srgb, var(--secondary-text-color) 85%, var(--primary-text-color));
+      -webkit-text-fill-color: currentColor;
     }
     .dish-day {
       font-size: 0.8rem;
-      color: var(--warning-color, #ff9800);
+      color: color-mix(in srgb, var(--warning-color, #ff9800) 50%, var(--primary-text-color));
+      -webkit-text-fill-color: currentColor;
     }
     .dish-kurz {
       font-size: 0.85rem;
-      color: var(--secondary-text-color);
+      color: color-mix(in srgb, var(--secondary-text-color) 85%, var(--primary-text-color));
+      -webkit-text-fill-color: currentColor;
       word-break: break-word;
     }
     .dish-select {
       margin-bottom: 8px;
       padding: 8px 10px;
       font-size: 16px;
+      color: var(--primary-text-color);
+      -webkit-text-fill-color: currentColor;
+      background: var(--card-background-color, var(--mdc-theme-surface, var(--ha-card-background)));
+      color-scheme: inherit;
+    }
+    .dish-select option,
+    .dish-select optgroup {
+      color: var(--primary-text-color);
+      background-color: var(--card-background-color, var(--mdc-theme-surface, var(--ha-card-background)));
     }
     .sr-only {
       position: absolute;

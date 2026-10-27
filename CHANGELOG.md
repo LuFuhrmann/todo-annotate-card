@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] – 2026-10-27
+
+### Fixed
+- Dish picker contrast in light and dark themes. Rows sit on the card surface (`--card-background-color` / `--mdc-theme-surface`) with `--primary-text-color`. Nutrition, place and description lines use `--secondary-text-color` mixed toward that text color, and the “laut Plan” / “as planned” marker no longer uses the light brand color `--primary-color` as text. The note editor’s dish list uses the same colors. Behavior is unchanged.
+
 ## [1.2.0] – 2026-10-27
 
 ### Added

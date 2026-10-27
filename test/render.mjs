@@ -369,6 +369,55 @@ for (const theme of ["hell", "dunkel"]) {
     check(`${theme} dish: short info`, shownInfo === info(first), `${shownInfo} | ${info(first)}`);
     const planned = (fx.punkte ?? {})[fx.items[lunch].summary]?.gericht_id;
     if (planned) check(`${theme} dish: planned dish marked`, (await rows.nth(lunch).locator(".dish", { hasText: "laut Plan" }).locator(".dish-name").innerText()).startsWith(gerichte.find((g) => g.id === planned).name));
+    const pickerContrast = await rows.nth(lunch).locator(".picker").evaluate((picker) => {
+      const parse = (c) => {
+        const s = String(c).trim();
+        let m = s.match(/rgba?\(([-\d.]+)[,\s]+([-\d.]+)[,\s]+([-\d.]+)(?:[,\s/]+([-\d.]+%?))?\)/i);
+        if (m) {
+          const a = m[4] == null ? 1 : m[4].endsWith("%") ? parseFloat(m[4]) / 100 : Number(m[4]);
+          return { rgb: [Number(m[1]), Number(m[2]), Number(m[3])], a };
+        }
+        m = s.match(/color\(srgb\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)(?:\s*\/\s*([-\d.]+))?\)/i);
+        if (m) {
+          const ch = (v) => { const n = Number(v); return n <= 1 ? n * 255 : n; };
+          return { rgb: [ch(m[1]), ch(m[2]), ch(m[3])], a: m[4] == null ? 1 : Number(m[4]) };
+        }
+        return null;
+      };
+      const lin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+      const L = (rgb) => 0.2126 * lin(rgb[0] / 255) + 0.7152 * lin(rgb[1] / 255) + 0.0722 * lin(rgb[2] / 255);
+      const ratio = (fg, bg) => {
+        const hi = Math.max(L(fg), L(bg));
+        const lo = Math.min(L(fg), L(bg));
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      const paint = (el) => {
+        let bg = [255, 255, 255];
+        const chain = [];
+        for (let e = el; e; e = e.parentElement) chain.push(e);
+        for (const e of chain.reverse()) {
+          const b = parse(getComputedStyle(e).backgroundColor);
+          if (!b || b.a === 0) continue;
+          bg = bg.map((v, i) => b.rgb[i] * b.a + v * (1 - b.a));
+        }
+        const raw = getComputedStyle(el).color;
+        const fg = parse(raw);
+        return { ratio: fg ? ratio(fg.rgb, bg) : 0, raw };
+      };
+      const out = [];
+      for (const dish of picker.querySelectorAll(".dish")) {
+        for (const sel of [".dish-name", ".dish-info", ".dish-kurz", ".dish-cur", ".dish-day"]) {
+          const el = dish.querySelector(sel);
+          if (el) out.push({ sel, ...paint(el) });
+        }
+      }
+      const title = picker.querySelector(".picker-title");
+      if (title) out.push({ sel: ".picker-title", ...paint(title) });
+      return out;
+    });
+    const weak = pickerContrast.filter((r) => r.ratio < 4.5);
+    check(`${theme} dish: picker text meets WCAG AA`, weak.length === 0, weak.map((r) => `${r.sel} ${r.ratio.toFixed(2)} ${r.raw}`).join(", ") || `min ${Math.min(...pickerContrast.map((r) => r.ratio)).toFixed(2)}`);
+    await rows.nth(lunch).locator(".picker").screenshot({ path: `${outDir}/${dprefix}-${theme}-2-picker.png` });
     await dshot(page, `${theme}-2-umplanen-auswahl`);
 
     await rows.nth(lunch).locator(".dish").nth(want.indexOf(pick.name)).click();
@@ -408,6 +457,27 @@ for (const theme of ["hell", "dunkel"]) {
     await page.waitForTimeout(100);
     const sel = rows.nth(post).locator(".dish-select");
     check(`${theme} dish: select in note editor`, (await sel.count()) === 1);
+    const selectContrast = await sel.evaluate((el) => {
+      const parse = (c) => {
+        const m = String(c).match(/rgba?\(([-\d.]+)[,\s]+([-\d.]+)[,\s]+([-\d.]+)(?:[,\s/]+([-\d.]+))?/);
+        if (!m) return null;
+        const a = m[4] == null ? 1 : Number(m[4]);
+        return { rgb: [Number(m[1]), Number(m[2]), Number(m[3])], a };
+      };
+      const lin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+      const L = (rgb) => 0.2126 * lin(rgb[0] / 255) + 0.7152 * lin(rgb[1] / 255) + 0.0722 * lin(rgb[2] / 255);
+      const ratio = (fg, bg) => (Math.max(L(fg), L(bg)) + 0.05) / (Math.min(L(fg), L(bg)) + 0.05);
+      const fg = parse(getComputedStyle(el).color);
+      const bg = parse(getComputedStyle(el).backgroundColor);
+      const opt = el.querySelector("option");
+      const ofg = opt ? parse(getComputedStyle(opt).color) : null;
+      const obg = opt ? parse(getComputedStyle(opt).backgroundColor) : null;
+      return {
+        control: fg && bg && bg.a > 0 ? ratio(fg.rgb, bg.rgb) : 0,
+        option: ofg && obg && obg.a > 0 ? ratio(ofg.rgb, obg.rgb) : null,
+      };
+    });
+    check(`${theme} dish: select text meets WCAG AA`, selectContrast.control >= 4.5 && (selectContrast.option == null || selectContrast.option >= 4.5), JSON.stringify(selectContrast));
     const groups = await sel.locator("optgroup").evaluateAll((g) => g.map((x) => x.label));
     check(`${theme} dish: fitting dishes first`, groups[0] === `Passt zu ${slotOfItem(post)}` && groups[1] === "Andere Gerichte", groups.join(" | "));
     await rows.nth(post).locator(".editor textarea.field").fill(C.typed);
